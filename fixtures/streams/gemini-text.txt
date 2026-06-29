@@ -1,0 +1,3 @@
+Analyzing the request…
+I'll add the timestamp helper to the logging module.
+Done. Added timestamped() to src/logging.mjs.

@@ -10,6 +10,7 @@ import type {
   InvokeResult,
   ProviderAdapter,
   ProviderEvent,
+  ProviderId,
 } from '@thaloslab/shared';
 
 export interface MockBehavior {
@@ -103,3 +104,9 @@ export const mockAdapter: ProviderAdapter = {
     yield { type: 'result', result };
   },
 };
+
+/** A provider-TAGGED mock used in --mock so a cross-provider run can be distinguished per provider
+ *  while staying fully scripted. Behavior is identical to `mockAdapter`; only the id differs. */
+export function mockFor(id: ProviderId): ProviderAdapter {
+  return id === 'mock' ? mockAdapter : { ...mockAdapter, id };
+}

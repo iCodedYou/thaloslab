@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"th_reconstructed"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"agent_message","text":"I'll fix the sum bug."}}
+{"type":"item.completed","item":{"type":"command_execution","command":"git diff"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Changed return a - b to a + b."}}
+{"type":"turn.completed","usage":{"input_tokens":1200,"output_tokens":64}}

@@ -272,6 +272,21 @@ The router resolves `(agentRole, change) → ProviderAdapter` using:
 
 The "reviewer differs from engineer" rule is the concrete encoding of adversarial independence and is enforced by the router, not left to chance.
 
+> **Phase 3 resolved — neutral policy + constraint-aware router ([DECISIONS](DECISIONS.md) #25, #26).**
+> The engine speaks a vendor-neutral `ToolPolicy`; each adapter's `enforce(policy)→{args,unmet}`
+> translates it and declares what it CANNOT express. The router is **constraint-aware + fail-closed**:
+> only providers that can enforce the role's least-privilege policy are eligible, THEN preference
+> order (per-project, default detection order), THEN the differ-rule (reviewer **must** differ,
+> auditor **prefers**); if nothing eligible remains it **PARKS/escalates** — never runs unconstrained.
+> Because Codex/Gemini express only coarse sandbox+approval (no per-command allowlist), **builders
+> fail-closed onto the allowlist-capable provider (Claude today)** while the read-only review/audit
+> roles route cross-provider — which is exactly where adversarial independence matters.
+>
+> **DEFERRED-PENDING-INSTALL:** Codex/Gemini were not installed on the build machine, so the real
+> multi-provider `--live` smoke, the verification of each provider's real `enforce()` unmet-set
+> against the actual CLI `--help`, and the re-capture of the (reconstructed) stream fixtures are
+> named open items — see DECISIONS "Deferred / open items".
+
 ---
 
 ## 6. The agent system

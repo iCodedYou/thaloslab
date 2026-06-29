@@ -32,6 +32,8 @@
 | 22 | Worktree topology — the lane model | one branch + worktree + gate-state per **lane**; sequential stages share a lane, fan-out engineers get isolated lanes; integration merges into `thalos/integration` only, never the default branch |
 | 23 | Merge-conflict posture | bounded, merge-scoped auto-resolve + full-gate re-check before accept; blast-radius changes escalate **immediately** (no agent touches sensitive merge markers) |
 | 24 | Specialist-gate realness — no silent no-op | every declared blocking gate either runs a real check or converts to a blocking **human** gate; a gate may never report green having run nothing |
+| 25 | Neutral permission policy | the engine speaks a vendor-neutral `ToolPolicy`; each adapter's `enforce(policy)→{args,unmet}` translates it, declaring what it CANNOT express — `unmet` is the router's fail-closed filter |
+| 26 | Constraint-aware cross-provider routing | the router picks the provider (engine never does), FAIL-CLOSED: only providers that can enforce the role's policy are eligible; reviewer MUST differ from the engineer's provider, auditor PREFERs; nothing eligible → PARK/escalate, never run unconstrained |
 
 ---
 
@@ -206,6 +208,50 @@ A declared blocking gate may **never** report green having run nothing. Speciali
 
 *Refines SPEC §7.*
 
+### 25. Neutral permission policy — **`ToolPolicy` + `enforce()`** (resolved during Phase 3)
+
+The engine speaks a **vendor-neutral** `ToolPolicy` (canRead/Write/ExecCommands, command allow/deny
+patterns, network posture, path scope, `relaxable`). Each adapter implements
+`enforce(policy) → { args, unmet }` — pure, zero-cost — translating the policy into that CLI's own
+mechanism and **declaring the constraints it CANNOT express** (`unmet`). No constraint may silently
+map to "unenforced": `unmet` is the router's fail-closed filter. Claude (per-tool allowlist) can
+express everything → `unmet` always empty; Codex/Gemini (coarse sandbox + approval) cannot express a
+per-command allowlist → builders fail-closed onto Claude, while the read-only review/audit roles map
+everywhere. The previous Claude-flavored `allowedTools` strings were a vendor leak in a
+supposedly-neutral contract; this removes it. *Refines SPEC §5.*
+
+### 26. Constraint-aware cross-provider routing — **fail-closed** (resolved during Phase 3)
+
+The **router** picks the provider; the engine never does (single chokepoint, like privilege). Pure
+function of (availability, per-project preference order [default = detection order claude>codex>gemini,
+overridable via `Project.routingPolicy`], the providers' `enforce→unmet`, the role's differ-rule).
+Order: installed+authenticated → **filter to providers that can enforce the role's policy** →
+preference order → differ-rule. The **reviewer MUST differ** from the engineer's ACTUAL provider, the
+**security-auditor PREFERs** to; degrade to same-provider-fresh-context when only the avoided is
+capable; **nothing eligible → PARK a human gate / escalate** naming the unmet constraint + provider —
+never run unconstrained. Provider assignment is split: a preferred provider is baked at assembly
+(visible in the Agents tab), re-resolved at invoke against live availability + the engineer's
+recorded `run.provider`. *Refines SPEC §5.*
+
+---
+
+## Deferred / open items (named, not silently skipped)
+
+**DEFERRED-PENDING-INSTALL (Phase 3 — Codex/Gemini not installed on the build machine).** Phase 3 is
+mechanically complete and deterministically proven (router + parser LOGIC), but **live-unverified**
+for Codex/Gemini until those CLIs are present. Before relying on them in `--live`:
+
+1. **Real multi-provider `--live` smoke** — one ticket where the reviewer runs on a genuinely
+   different installed provider than the engineer (the canary for flag/output drift).
+2. **Verify each provider's real `enforce()` unmet-set** against the actual `codex`/`gemini`
+   `--help` + sandbox docs. The mapping in `codex.ts`/`gemini.ts` is an ASSUMPTION — a wrong mapping
+   is either a needless Claude-pin (mocked `unmet` but really capable) or a real **safety hole**
+   (mocked met but really can't enforce). The mock validates router logic, never the mapping itself.
+3. **Re-validate the stream fixtures** (`fixtures/streams/`) against the installed CLI version and
+   **re-capture** them — they are RECONSTRUCTED from documented formats, not captured from a real
+   run (see `fixtures/streams/PROVENANCE.md`). A fixture whose stamped version differs from the
+   installed CLI is STALE (re-capture), not just the code.
+
 ---
 
 ## Spec refinements implied by these decisions
@@ -219,6 +265,7 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§9** — GitHub optional, not required; engineer network defaults to allowlist (not none); local repo always created, GitHub create/push best-effort → local-only (#18).
 - **§10** — track `agents/` + `config.json`; gitignore `artifacts/` + `worktrees/` + `runs.log` by default; one global SQLite DB holds all tables incl. artifact index, `.thalos/` holds bytes (#14).
 - **§11** — default collab sharing scope = brief + worktree + interface context pack, secrets stripped.
+- **§5** — the engine speaks a neutral `ToolPolicy`; adapters' `enforce()→{args,unmet}` translate it (#25); the constraint-aware router picks the provider fail-closed, reviewer-must-differ / auditor-prefers, nothing-eligible → PARK (#26). Codex/Gemini are live-unverified (DEFERRED-PENDING-INSTALL above).
 - **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23).
 - **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
 - **§15** — OS sandboxing gates Phase 5 (ships with collab), not Phase 6.

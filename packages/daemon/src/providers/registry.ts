@@ -10,10 +10,13 @@ import type {
 import { getProject } from '../store/repositories/projects';
 import { listProviders, upsertProvider } from '../store/repositories/providers';
 import { claudeAdapter } from './claude';
-import { mockAdapter } from './mock';
+import { codexAdapter } from './codex';
+import { geminiAdapter } from './gemini';
+import { mockFor } from './mock';
 import type { RouterCtx } from './router';
 
-const adapters: ProviderAdapter[] = [claudeAdapter];
+// Registration order is the default preference order (claude > codex > gemini), per-project overridable.
+const adapters: ProviderAdapter[] = [claudeAdapter, codexAdapter, geminiAdapter];
 
 export function getAdapters(): ProviderAdapter[] {
   return adapters;
@@ -28,7 +31,9 @@ export function getAdapter(id: ProviderId): ProviderAdapter | undefined {
  * scripted mock adapter (no tokens) — this is the single switch that keeps mock runs deterministic.
  */
 export function adapterFor(providerId: ProviderId, mode: ExecutionMode): ProviderAdapter {
-  if (mode === 'mock') return mockAdapter;
+  // In --mock every invocation uses a PROVIDER-TAGGED mock (deterministic, zero tokens). The tag
+  // lets a cross-provider mock run be told apart per provider while staying scripted.
+  if (mode === 'mock') return mockFor(providerId);
   const adapter = getAdapter(providerId);
   if (!adapter) throw new Error(`no provider adapter for "${providerId}"`);
   return adapter;
