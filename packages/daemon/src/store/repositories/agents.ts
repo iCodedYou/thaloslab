@@ -71,6 +71,24 @@ export function getAgent(id: string): AgentConfig | null {
   return row ? toAgent(row) : null;
 }
 
+/** Human-editable fields (the Agents tab). Returns the updated config, or null if absent. */
+export function updateAgent(
+  id: string,
+  patch: Partial<Pick<AgentConfig, 'name' | 'systemPrompt' | 'status' | 'model'>>,
+): AgentConfig | null {
+  const existing = getAgent(id);
+  if (!existing) return null;
+  const next: AgentConfig = {
+    ...existing,
+    ...(patch.name !== undefined ? { name: patch.name } : {}),
+    ...(patch.systemPrompt !== undefined ? { systemPrompt: patch.systemPrompt } : {}),
+    ...(patch.status !== undefined ? { status: patch.status } : {}),
+    ...(patch.model !== undefined ? { model: patch.model } : {}),
+  };
+  getDb().update(agents).set(values(next)).where(eq(agents.id, id)).run();
+  return next;
+}
+
 export function listAgentsByProject(projectId: string): AgentConfig[] {
   return getDb().select().from(agents).where(eq(agents.projectId, projectId)).all().map(toAgent);
 }

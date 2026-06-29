@@ -7,6 +7,7 @@ import { registerProviderRoutes } from './routes/providers';
 import { registerProjectRoutes } from './routes/projects';
 import { registerTicketRoutes } from './routes/tickets';
 import { registerGateRoutes } from './routes/gates';
+import { registerAgentRoutes } from './routes/agents';
 
 export interface BuildAppOptions {
   health: HealthContext;
@@ -19,6 +20,7 @@ export function buildApp(opts: BuildAppOptions): FastifyInstance {
   registerHealth(app, opts.health);
   registerProviderRoutes(app);
   registerProjectRoutes(app);
+  registerAgentRoutes(app);
   if (opts.runtime) {
     registerTicketRoutes(app, opts.runtime);
     registerGateRoutes(app, opts.runtime);

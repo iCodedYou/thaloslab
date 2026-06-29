@@ -73,6 +73,18 @@ describe('agents repository', () => {
     expect(all[0]?.name).toBe('Engineer (renamed)');
   });
 
+  it('updates human-editable fields (name/prompt/status) and leaves policy intact', () => {
+    repo.upsertAgent(agent({ id: 'ag-p-architect', role: 'architect' }));
+    const updated = repo.updateAgent('ag-p-architect', {
+      name: 'Lead Architect',
+      status: 'inactive',
+    });
+    expect(updated).toMatchObject({ name: 'Lead Architect', status: 'inactive' });
+    // authority/access are not editable here — unchanged.
+    expect(updated?.authority).toBe('L2-execute-gated');
+    expect(repo.updateAgent('does-not-exist', { name: 'x' })).toBeNull();
+  });
+
   it('mirrors to .thalos/agents/*.json and reads them back', () => {
     const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'thalos-agentsdir-'));
     try {

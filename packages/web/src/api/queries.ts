@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  AgentConfig,
+  AgentStatus,
   DetectedProvider,
   ExecutionMode,
   Gate,
@@ -9,7 +11,7 @@ import type {
   Task,
   Ticket,
 } from '@thaloslab/shared';
-import { apiGet, apiPost } from './client';
+import { apiGet, apiPatch, apiPost } from './client';
 
 export function useProjects() {
   return useQuery({ queryKey: ['projects'], queryFn: () => apiGet<Project[]>('/api/projects') });
@@ -73,6 +75,25 @@ export function useCreateTicket() {
     mutationFn: (body: { projectId: string; title: string; body?: string; mode: ExecutionMode }) =>
       apiPost<{ ticket: Ticket }>('/api/tickets', body),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['tickets'] }),
+  });
+}
+
+export function useAgents(projectId?: string) {
+  return useQuery({
+    queryKey: ['agents', projectId],
+    queryFn: () => apiGet<AgentConfig[]>(`/api/agents?projectId=${projectId}`),
+    enabled: Boolean(projectId),
+  });
+}
+
+export function useUpdateAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      id: string;
+      patch: { name?: string; systemPrompt?: string; status?: AgentStatus };
+    }) => apiPatch<{ agent: AgentConfig }>(`/api/agents/${args.id}`, args.patch),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['agents'] }),
   });
 }
 

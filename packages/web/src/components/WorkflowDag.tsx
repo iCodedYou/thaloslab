@@ -21,6 +21,12 @@ export function WorkflowDag({ tasks }: { tasks: Task[] }) {
                 gate
               </span>
             )}
+            {/* Lane badge — fan-out children show their seam so parallel lanes are visible. */}
+            {t.laneId && !t.laneId.endsWith(':main') && (
+              <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] text-accent">
+                {t.laneId.split(':').pop()}
+              </span>
+            )}
             <span className={`ml-auto font-mono text-xs ${TEXT_CLASS[tone]}`}>{t.state}</span>
             {(t.retryCount > 0 || t.attempt > 0) && (
               <span className="font-mono text-[10px] text-faint">
