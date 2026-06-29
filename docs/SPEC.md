@@ -837,6 +837,15 @@ The app runs AI agents that execute code on the user's machine, so safety is fir
 
 Built using the very methodology the app implements: phased, verification-anchored, blast-radius-scaled, each phase a shippable vertical slice. Earlier phases de-risk the core; collab (highest-trust-risk) is last.
 
+> **Status (build): Phases 0–5 COMPLETE** — built, gated green, and banked. Each was proven
+> deterministically (`pnpm gate`) plus, where applicable, a real `--live` smoke; what could not be
+> verified on the build machine is **named and deferred behind an on-target pre-trust gate**, never
+> silently claimed (see [DECISIONS](DECISIONS.md) "Deferred / open items" for the single consolidated
+> list: `DEFERRED-PENDING-INSTALL` (Codex/Gemini), `DEFERRED-PENDING-BUDGET` (the `--live` greenfield
+> smoke), `DEFERRED-PENDING-LINUX` / `DEFERRED-PENDING-MACOS` (real sandbox confinement),
+> `DEFERRED-PENDING-MULTI-MACHINE` (the real collab wire), and the per-domain network-allowlist proxy).
+> **Phase 6 (hardening) is the only remaining roadmap item.**
+
 **Phase 0 — Scaffolding.** Monorepo + workspaces; `thaloslab` bin with the menu and flags; daemon (Fastify + ws) with health; React+Vite UI shell with the left-rail layout and design tokens; SQLite + migrations; provider detection for **Claude only**; project create (new local + GitHub repo) and import (clone); `.thalos/` layout. *Outcome:* `thaloslab` launches, opens the UI, lists a project, detects Claude.
 
 **Phase 1 — Single-agent vertical slice.** Orchestrator chat backed by the user's provider; one workflow template (**bug fix** end to end) with Engineer → automated gates → adversarial reviewer → test author; worktree execution; preview then `--live`; artifact store; the tickets/progress tab showing the DAG. *Outcome:* file a ticket → orchestrator runs a minimal pipeline → produces a reviewed, tested change behind an approval gate. This proves the whole spine.

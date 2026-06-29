@@ -322,6 +322,21 @@ keys. *Refines SPEC §11 + §14.*
 
 ## Deferred / open items (named, not silently skipped)
 
+**The complete list (one place; each runs for real on-target before it is trusted):**
+
+| Tag | What | Pre-trust gate that runs before it's trusted |
+|---|---|---|
+| `DEFERRED-PENDING-INSTALL` | Codex/Gemini real `enforce()` mapping + stream-parser conformance (Phase 3) | run the real CLI: verify `unmet`-set vs `--help`, re-capture the stream fixtures |
+| `DEFERRED-PENDING-BUDGET` | the `--live` greenfield smoke (Phase 4) | a manual capped build on real `pnpm` (≤2 lanes/300k tok/$5/15min/12 invokes; first cap ABORTS) |
+| `DEFERRED-PENDING-LINUX` | real bubblewrap confinement (Phase 5) | the self-test's real escape probe, DENIED by a real jail on a Linux box |
+| `DEFERRED-PENDING-MACOS` | sandbox-exec/Lima (not yet implemented) (Phase 5) | the same self-test on macOS |
+| `DEFERRED-PENDING-MULTI-MACHINE` | the real cross-machine collab wire (Phase 5) | a real remote peer over the tunnel (the mock proved the trust logic, not the wire) |
+| `DEFERRED` (no target) | the per-domain network-allowlist filtering proxy (Phase 5) | n/a — only `network:none` is jail-enforceable, so `network:allowlist` stays Claude-pinned |
+
+Until each is run-and-passed on real hardware, its subject stays at the safe posture already in place
+(an unverified jail = NoopSandbox-equivalent → no router relaxation, collab fail-closed; an unverified
+provider mapping = the mock's assumption, not a proof). Nothing below is overclaimed.
+
 ### Phase 5 — sandbox + collab (the value of this phase is that its gaps are NAMED)
 
 The trust LOGIC is proven on the Windows build machine (self-test decision logic, router relaxation,
