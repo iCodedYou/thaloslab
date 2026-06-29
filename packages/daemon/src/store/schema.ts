@@ -1,7 +1,7 @@
 // Full SQLite schema (SPEC §10). The entire schema is migrated up front; data-access
 // repositories are built only for the tables a phase uses (DECISIONS #19 — Phase 0: projects,
 // providers). One global DB across all projects (DECISIONS #14).
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
@@ -35,57 +35,78 @@ export const agents = sqliteTable('agents', {
   createdAt: integer('created_at').notNull(),
 });
 
-export const tickets = sqliteTable('tickets', {
-  id: text('id').primaryKey(),
-  projectId: text('project_id')
-    .notNull()
-    .references(() => projects.id),
-  title: text('title').notNull(),
-  body: text('body'),
-  taskType: text('task_type'),
-  mutating: integer('mutating'),
-  blastRadiusJson: text('blast_radius_json'),
-  workflowId: text('workflow_id'),
-  status: text('status').notNull(),
-  mode: text('mode', { enum: ['preview', 'live', 'mock'] }).notNull(),
-  createdAt: integer('created_at').notNull(),
-});
+export const tickets = sqliteTable(
+  'tickets',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id),
+    title: text('title').notNull(),
+    body: text('body'),
+    taskType: text('task_type'),
+    mutating: integer('mutating'),
+    blastRadiusJson: text('blast_radius_json'),
+    workflowId: text('workflow_id'),
+    status: text('status').notNull(),
+    mode: text('mode', { enum: ['preview', 'live', 'mock'] }).notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => ({ statusIdx: index('tickets_status_idx').on(t.status) }),
+);
 
-export const tasks = sqliteTable('tasks', {
-  id: text('id').primaryKey(),
-  ticketId: text('ticket_id')
-    .notNull()
-    .references(() => tickets.id),
-  stageId: text('stage_id').notNull(),
-  agentId: text('agent_id').references(() => agents.id),
-  dependsOnJson: text('depends_on_json'),
-  worktreePath: text('worktree_path'),
-  branch: text('branch'),
-  state: text('state').notNull(),
-  retryCount: integer('retry_count').default(0),
-  createdAt: integer('created_at').notNull(),
-});
+export const tasks = sqliteTable(
+  'tasks',
+  {
+    id: text('id').primaryKey(),
+    ticketId: text('ticket_id')
+      .notNull()
+      .references(() => tickets.id),
+    stageId: text('stage_id').notNull(),
+    kind: text('kind', { enum: ['stage', 'gate'] })
+      .notNull()
+      .default('stage'),
+    agentId: text('agent_id').references(() => agents.id),
+    dependsOnJson: text('depends_on_json'),
+    worktreePath: text('worktree_path'),
+    branch: text('branch'),
+    state: text('state').notNull(),
+    retryCount: integer('retry_count').notNull().default(0),
+    attempt: integer('attempt').notNull().default(0),
+    lastError: text('last_error'),
+    lastErrorSignature: text('last_error_signature'),
+    startedAt: integer('started_at'),
+    endedAt: integer('ended_at'),
+    updatedAt: integer('updated_at'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => ({ ticketStateIdx: index('tasks_ticket_state_idx').on(t.ticketId, t.state) }),
+);
 
-export const runs = sqliteTable('runs', {
-  id: text('id').primaryKey(),
-  taskId: text('task_id')
-    .notNull()
-    .references(() => tasks.id),
-  agentId: text('agent_id')
-    .notNull()
-    .references(() => agents.id),
-  provider: text('provider').notNull(),
-  requestedProvider: text('requested_provider'),
-  prompt: text('prompt'),
-  output: text('output'),
-  changedFilesJson: text('changed_files_json'),
-  inputTokens: integer('input_tokens'),
-  outputTokens: integer('output_tokens'),
-  costUsd: real('cost_usd'),
-  durationMs: integer('duration_ms'),
-  status: text('status').notNull(),
-  startedAt: integer('started_at').notNull(),
-});
+export const runs = sqliteTable(
+  'runs',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id),
+    agentId: text('agent_id').references(() => agents.id),
+    provider: text('provider').notNull(),
+    requestedProvider: text('requested_provider'),
+    prompt: text('prompt'),
+    output: text('output'),
+    changedFilesJson: text('changed_files_json'),
+    errorSignature: text('error_signature'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    costUsd: real('cost_usd'),
+    durationMs: integer('duration_ms'),
+    status: text('status').notNull(),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at'),
+  },
+  (t) => ({ taskStartedIdx: index('runs_task_started_idx').on(t.taskId, t.startedAt) }),
+);
 
 export const gates = sqliteTable('gates', {
   id: text('id').primaryKey(),
@@ -94,10 +115,16 @@ export const gates = sqliteTable('gates', {
     .references(() => tickets.id),
   taskId: text('task_id').references(() => tasks.id),
   kind: text('kind').notNull(),
+  title: text('title'),
+  prompt: text('prompt'),
   checksJson: text('checks_json'),
+  artifactRefId: text('artifact_ref_id'),
   status: text('status').notNull(),
+  decision: text('decision', { enum: ['approve', 'reject', 'request-changes'] }),
+  comment: text('comment'),
   resolvedBy: text('resolved_by'),
   resolvedAt: integer('resolved_at'),
+  createdAt: integer('created_at'),
 });
 
 export const artifacts = sqliteTable('artifacts', {
@@ -143,3 +170,22 @@ export const messages = sqliteTable('messages', {
   payloadJson: text('payload_json').notNull(),
   createdAt: integer('created_at').notNull(),
 });
+
+// Append-only audit/streaming log (commentary only — never replayed to re-execute). `seq` is a
+// per-ticket monotonic counter so a reconnecting UI can fetch "everything after seq N".
+export const taskEvents = sqliteTable(
+  'task_events',
+  {
+    id: text('id').primaryKey(),
+    ticketId: text('ticket_id')
+      .notNull()
+      .references(() => tickets.id),
+    taskId: text('task_id').references(() => tasks.id),
+    gateId: text('gate_id').references(() => gates.id),
+    type: text('type').notNull(),
+    payloadJson: text('payload_json'),
+    seq: integer('seq').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => ({ ticketSeqIdx: index('task_events_ticket_seq_idx').on(t.ticketId, t.seq) }),
+);

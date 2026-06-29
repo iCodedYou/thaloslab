@@ -70,7 +70,15 @@ export interface Project {
 
 // ---- Tickets (SPEC §10) ----
 
-export type TicketStatus = 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'aborted';
+export type TicketStatus =
+  | 'queued'
+  | 'running'
+  | 'blocked'
+  | 'preview-complete' // preview rendered the plan/DAG and stopped without executing
+  | 'done'
+  | 'failed'
+  | 'escalated'
+  | 'aborted';
 
 export interface Ticket {
   id: string;
@@ -140,4 +148,104 @@ export interface WorkflowTemplate {
   mutating: boolean;
   stages: StageDef[];
   gates: GateDef[];
+}
+
+// ---- Workflow engine runtime (SPEC §7) — task-graph state machine ----
+
+/** Task-graph node states (SPEC §7): pending → running → (review → fixing)* → … → terminal. */
+export type TaskState =
+  | 'pending'
+  | 'running'
+  | 'review'
+  | 'fixing'
+  | 'blocked-on-human'
+  | 'passed'
+  | 'failed'
+  | 'escalated'
+  | 'done';
+
+export type TaskKind = 'stage' | 'gate';
+
+/** Automated gates resolve passed/failed; human gates resolve via `decision`. */
+export type GateStatus = 'pending' | 'passed' | 'failed' | 'resolved';
+export type GateDecision = 'approve' | 'reject' | 'request-changes';
+
+export type RunStatus = 'running' | 'ok' | 'error' | 'timeout' | 'interrupted' | 'stubbed';
+
+/** Append-only audit/streaming event (commentary only — never replayed to re-execute). */
+export interface TaskEvent {
+  id: string;
+  ticketId: string;
+  taskId?: string;
+  gateId?: string;
+  type: string;
+  payload?: unknown;
+  /** Per-ticket monotonic counter for reconnect/gap-fetch. */
+  seq: number;
+  createdAt: number;
+}
+
+/** Resolved once from ExecutionMode; the only thing side-effecting boundaries check. */
+export interface EngineCapabilities {
+  invokeAgents: boolean;
+  mutateRepo: boolean;
+}
+
+/** A task-graph node instance (a row in `tasks`), with `dependsOn` parsed. */
+export interface Task {
+  id: string;
+  ticketId: string;
+  stageId: string;
+  kind: TaskKind;
+  agentId?: string;
+  dependsOn: string[];
+  worktreePath?: string;
+  branch?: string;
+  state: TaskState;
+  retryCount: number;
+  attempt: number;
+  lastError?: string;
+  lastErrorSignature?: string;
+  startedAt?: number;
+  endedAt?: number;
+  updatedAt?: number;
+  createdAt: number;
+}
+
+/** One provider invocation (a row in `runs`). */
+export interface Run {
+  id: string;
+  taskId: string;
+  agentId?: string;
+  provider: string;
+  requestedProvider?: string;
+  prompt?: string;
+  output?: string;
+  changedFiles?: string[];
+  errorSignature?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+  durationMs?: number;
+  status: RunStatus;
+  startedAt: number;
+  endedAt?: number;
+}
+
+/** A gate instance (a row in `gates`) — automated (passed/failed) or human (decision). */
+export interface Gate {
+  id: string;
+  ticketId: string;
+  taskId?: string;
+  kind: 'automated' | 'human';
+  title?: string;
+  prompt?: string;
+  checks?: GateCheck[];
+  artifactRefId?: string;
+  status: GateStatus;
+  decision?: GateDecision;
+  comment?: string;
+  resolvedBy?: string;
+  resolvedAt?: number;
+  createdAt?: number;
 }
