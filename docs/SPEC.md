@@ -353,6 +353,19 @@ A project has a **phase** that determines default roster activation, exactly mat
 
 When a from-scratch MVP build completes, the project transitions Bootstrapping → Maintenance automatically and the non-orchestrator agents go inactive (their configs are retained and visible/editable).
 
+> **Phase 4 resolved — phase is load-bearing ([DECISIONS](DECISIONS.md) #27).** Intake routes by
+> **phase, not triage**: a `bootstrapping` project with no *completed* greenfield ticket gets the
+> greenfield workflow (`spec → spec-signoff → scaffold → scaffold-integrate → decompose fan-out →
+> impl → integrate → security → pre-ship`); the architect INVENTS the structure (the scaffold
+> materializes it before decomposition). The gate model inverts to **absolute** gating — gate commands
+> are detected from the **stage's worktree** (the scaffold's toolchain lives on `thalos/integration`,
+> not yet on `main`), and the **baseline is BORN** by the scaffold so ticket #2 (maintenance) regains
+> the differential machinery. Acceptance teeth live at **integration-sweep** (the full suite on the
+> combined tree = "MVP exists"); `impl-green` is compile-level. The transition flips **only on terminal
+> `done`** (crash-safe, idempotent; DB authoritative, `config.json` mirrored). The MVP **never
+> auto-lands on `main`** — that stays a separate human-authorized land (no greenfield exception). The
+> real `--live` greenfield smoke is **DEFERRED-PENDING-BUDGET** (DECISIONS "Deferred / open items").
+
 ### Defaults are versioned with the project
 
 All agent configs live both in SQLite and as files under `.thalos/agents/` in the project repo, so the team's agent setup is inspectable and (optionally) version-controlled with the code.

@@ -34,6 +34,7 @@
 | 24 | Specialist-gate realness — no silent no-op | every declared blocking gate either runs a real check or converts to a blocking **human** gate; a gate may never report green having run nothing |
 | 25 | Neutral permission policy | the engine speaks a vendor-neutral `ToolPolicy`; each adapter's `enforce(policy)→{args,unmet}` translates it, declaring what it CANNOT express — `unmet` is the router's fail-closed filter |
 | 26 | Constraint-aware cross-provider routing | the router picks the provider (engine never does), FAIL-CLOSED: only providers that can enforce the role's policy are eligible; reviewer MUST differ from the engineer's provider, auditor PREFERs; nothing eligible → PARK/escalate, never run unconstrained |
+| 27 | Greenfield bootstrapping + phase transition | a scratch project's first ticket runs the greenfield workflow (phase-driven); the baseline is BORN by the scaffold; `done` flips bootstrapping→maintenance; the MVP NEVER auto-lands on `main` (no exception); integration-sweep (full acceptance suite) is the "MVP exists" gate |
 
 ---
 
@@ -233,9 +234,54 @@ never run unconstrained. Provider assignment is split: a preferred provider is b
 (visible in the Agents tab), re-resolved at invoke against live availability + the engineer's
 recorded `run.provider`. *Refines SPEC §5.*
 
+### 27. Greenfield bootstrapping + Bootstrapping→Maintenance transition (resolved during Phase 4)
+
+A from-scratch project starts as a README commit on `main` with `.thalos/` scaffolded (the git
+substrate); `phase` becomes load-bearing. **Intake routes by phase, not triage:** a `bootstrapping`
+project with no *completed* greenfield ticket gets the **greenfield workflow** (spec → spec-signoff →
+scaffold → scaffold-integrate → decompose fan-out → impl lanes → integrate → security → pre-ship); a
+concurrent second bootstrap is rejected. The **architect INVENTS** the module structure (the scaffold
+materializes it as real dirs + interface-contract stubs, so the existing disjointness/path-ownership
+guards work on designed seams exactly as on discovered ones).
+
+**The gate model inverts gracefully — no "weaker gates for greenfield."** Greenfield names no
+`repro`/`fix` stage, so the differential machinery is simply never selected; gating is **absolute**.
+The decisive fix: `detectGateCommands` reads the **stage's worktree** (`wt.path` / `integDir`), not
+the main repo — the scaffold's `package.json` lives on `thalos/integration` before it ever reaches
+`main`, and reading `main` would return `{}` and let every gate **silently pass having run nothing**.
+The **baseline is BORN** by the scaffold commit and grows as seams land; once the ticket is `done`,
+the suite IS the baseline and ticket #2 (maintenance) gets the Phase 1-3 differential machinery back.
+
+**Acceptance teeth live at integration-sweep.** Because the whole-MVP acceptance suite is RED until
+every seam lands, `impl-green` is **compile-level** (build/typecheck/lint — the lane builds against
+the contracts) and the **full acceptance suite runs once, on the combined tree, at integration-sweep**
+— the single gate that proves "the spec's acceptance criteria are met = MVP exists." A seam left
+unimplemented stays red there → no `done` → no flip.
+
+**The transition:** `setProjectPhase` flips bootstrapping→maintenance in `reconcileTicket` ONLY on
+terminal `done` (unreachable from the escalate/fail branches), guarded by phase (idempotent under
+reconcile's repeats + terminal-absorb); DB authoritative, `.thalos/config.json` a best-effort mirror.
+**No landing exception:** the workflow ends on `thalos/integration`; the MVP→`main` land stays a
+separate human-authorized action (the highest-stakes land — last to automate), uniform across all
+tickets. *Refines SPEC §6 + §7.*
+
 ---
 
 ## Deferred / open items (named, not silently skipped)
+
+**DEFERRED-PENDING-BUDGET (Phase 4 — the `--live` greenfield smoke).** Greenfield is the largest
+single token spend in the project (a full MVP from nothing). The deterministic `--mock` bar is the
+**standing proof** (the full run → done → flip, the *born baseline* via ticket #2, the
+integration-sweep *teeth*, the absorbing partial-failure path). The **real `--live` greenfield smoke**
+— a manual, opt-in, never-in-CI build of a deliberately tiny MVP that exercises discovery →
+spec-gate → architect-invents-structure → multi-lane build on real `pnpm` — is **deferred pending an
+explicit budget opt-in**, under a hard cap decided in advance: **≤ 2 seams/lanes, ≤ 300k output tokens
+(≈ $5), ≤ 15 min, ≤ 12 agent invocations**; the **first cap hit ABORTS** the run (never runs away).
+It validates the `detectGateCommands`-from-worktree path against a real package manager — the only
+thing the mock bar can't. Until run, Phase 4 is *mechanically complete + deterministically proven,
+real-agent-greenfield-unverified*.
+
+
 
 **DEFERRED-PENDING-INSTALL (Phase 3 — Codex/Gemini not installed on the build machine).** Phase 3 is
 mechanically complete and deterministically proven (router + parser LOGIC), but **live-unverified**
@@ -266,7 +312,8 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§10** — track `agents/` + `config.json`; gitignore `artifacts/` + `worktrees/` + `runs.log` by default; one global SQLite DB holds all tables incl. artifact index, `.thalos/` holds bytes (#14).
 - **§11** — default collab sharing scope = brief + worktree + interface context pack, secrets stripped.
 - **§5** — the engine speaks a neutral `ToolPolicy`; adapters' `enforce()→{args,unmet}` translate it (#25); the constraint-aware router picks the provider fail-closed, reviewer-must-differ / auditor-prefers, nothing-eligible → PARK (#26). Codex/Gemini are live-unverified (DEFERRED-PENDING-INSTALL above).
-- **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23).
+- **§6** — `phase` is load-bearing: a bootstrapping scratch project runs the greenfield workflow (phase-driven intake); `done` flips bootstrapping→maintenance, bound to reconcile's done-path; the scaffold BORNS the baseline so ticket #2 gets differential gating back (#27).
+- **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23); greenfield gating is ABSOLUTE (gate commands read from the worktree; integration-sweep is the MVP-exists gate with teeth); the MVP never auto-lands on `main` (#27). The `--live` greenfield smoke is DEFERRED-PENDING-BUDGET (above).
 - **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
 - **§15** — OS sandboxing gates Phase 5 (ships with collab), not Phase 6.
 - **CLAUDE.md** — gate toolchain pinned (Vitest/ESLint/tsc/Prettier) + aggregate `gate` + pre-commit hook (#16); migrate full schema up front, repositories only for tables a phase uses (#19).

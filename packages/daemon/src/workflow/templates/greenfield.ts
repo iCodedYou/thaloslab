@@ -17,11 +17,18 @@
 //                      package.json before the merge → no `unit` baseline to run).
 //   decompose          the architect fans out over the now-REAL directories (disjointness + ownership
 //                      are checkable because the seams physically exist).
-//   impl (fan-out)     one engineer per seam fills its module, turning its RED acceptance tests GREEN.
-//                      impl-green is ABSOLUTE (build/typecheck/lint/unit) and has teeth — a red/empty
-//                      suite can't pass (the greenfield analog of repro-red).
-//   integrate          the integrator merges the impl lanes; integration-sweep runs the now-GREEN suite
-//                      (the baseline is BORN — ticket #2 gets the Phase 1-3 differential machinery back).
+//   impl (fan-out)     one engineer per seam fills its module against the contracts. impl-green is
+//                      COMPILE-level (build/typecheck/lint): the lane builds against the interface
+//                      stubs. It deliberately does NOT run the full acceptance suite — that suite is
+//                      whole-MVP RED until every seam lands, so running it per-lane would fail every
+//                      lane (a lane only implements its own seam). Behavioral correctness is proven
+//                      once, on the combined tree, at integration-sweep.
+//   integrate          the integrator merges the impl lanes; integration-sweep runs the FULL acceptance
+//                      suite vs the combined tree — the single gate that proves "the spec's acceptance
+//                      criteria are met = MVP exists" (and the Bootstrapping→Maintenance criterion). It
+//                      has TEETH: a seam left unimplemented stays RED here, so the ticket never reaches
+//                      `done` and the project never flips to maintenance. The now-GREEN suite is also
+//                      the BORN baseline — ticket #2 gets the Phase 1-3 differential machinery back.
 //   [pre-ship]         human signs off the MVP. The workflow ends on thalos/integration; `main` is
 //                      NEVER auto-landed (no greenfield exception — landing is a separate human action).
 import type { WorkflowTemplate } from '@thaloslab/shared';
@@ -66,14 +73,18 @@ export const greenfieldTemplate: WorkflowTemplate = {
       id: 'impl-green',
       kind: 'automated',
       after: 'impl',
-      // ABSOLUTE: the seam's acceptance tests must PASS (build green + suite green from zero).
-      checks: ['build', 'typecheck', 'lint', 'unit'],
+      // COMPILE-level only: the lane builds against the interface contracts. NOT `unit` — the full
+      // acceptance suite is whole-MVP red until every seam lands; behavioral correctness is verified
+      // on the combined tree at integration-sweep.
+      checks: ['build', 'typecheck', 'lint'],
       blocking: true,
     },
     {
       id: 'integration-sweep',
       kind: 'automated',
       after: 'integrate',
+      // The MVP-exists gate (and the transition criterion): the FULL acceptance suite vs the combined
+      // tree. Has teeth — an unimplemented/incorrect seam stays red here → no `done` → no phase flip.
       checks: ['unit'],
       blocking: true,
     },
