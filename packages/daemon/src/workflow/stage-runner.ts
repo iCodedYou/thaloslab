@@ -34,6 +34,13 @@ import {
 } from './gates';
 import { outOfSeam, parseDecomposition, writeDecomposition } from './decomposition';
 import {
+  UNIMPLEMENTED_CHECKS,
+  benchmarkRegressed,
+  parseBenchmark,
+  runA11y,
+  runSecurityScan,
+} from './specialist-gates';
+import {
   agentFromRole,
   allowedToolsFor,
   clampSynthesized,
@@ -115,6 +122,72 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       output: reason.slice(0, 500),
       errorSignature: errorSignature(reason),
     };
+  }
+
+  function benchmarkBaselinePath(repoPath: string, ticketId: string): string {
+    return path.join(repoPath, THALOS_DIR_NAME, 'artifacts', ticketId, 'benchmark-baseline.json');
+  }
+
+  /**
+   * Evaluate ONE gate check. Specialist checks run REAL implementations; an unimplemented declared
+   * check (visual-diff — normally converted to a human gate at assembly) blocks LOUDLY here too, as
+   * defense in depth. Deterministic checks the project doesn't declare are skipped (optional).
+   */
+  async function evalGateCheck(
+    check: GateCheck,
+    repoPath: string,
+    dir: string,
+    ticketId: string,
+    changedFiles: string[],
+    commands: ReturnType<typeof detectGateCommands>,
+  ): Promise<{ ok: boolean; output: string }> {
+    if (check === 'security') return runSecurityScan(dir, changedFiles);
+    if (check === 'a11y') {
+      const htmlFiles = changedFiles
+        .filter((f) => f.endsWith('.html'))
+        .map((f) => {
+          try {
+            return { path: f, content: fs.readFileSync(path.join(dir, f), 'utf8') };
+          } catch {
+            return null;
+          }
+        })
+        .filter((x): x is { path: string; content: string } => x !== null);
+      if (htmlFiles.length === 0) {
+        return {
+          ok: false,
+          output: 'a11y: no HTML output to inspect — blocked (not silently passed)',
+        };
+      }
+      return runA11y(htmlFiles);
+    }
+    if (check === 'benchmark') {
+      const cmd = commands.benchmark;
+      let baseline: number | null = null;
+      try {
+        baseline = JSON.parse(
+          fs.readFileSync(benchmarkBaselinePath(repoPath, ticketId), 'utf8'),
+        ).value;
+      } catch {
+        baseline = null;
+      }
+      if (!cmd || baseline === null) {
+        return { ok: false, output: 'benchmark: no command or baseline — blocked' };
+      }
+      const res = await runCheck('benchmark', cmd, dir);
+      const current = parseBenchmark(res.output);
+      if (current === null) return { ok: false, output: 'benchmark: unparseable output — blocked' };
+      return benchmarkRegressed(baseline, current)
+        ? { ok: false, output: `benchmark regressed: baseline ${baseline} → ${current}` }
+        : { ok: true, output: '' };
+    }
+    if (UNIMPLEMENTED_CHECKS.has(check)) {
+      return { ok: false, output: `gate '${check}' has no automated implementation — blocked` };
+    }
+    const cmd = commands[check];
+    if (!cmd) return { ok: true, output: '' }; // optional deterministic check the project omits
+    const res = await runCheck(check, cmd, dir);
+    return { ok: res.ok, output: res.output };
   }
 
   /** Run the deterministic gates (build/type/lint + unit) in a directory; first failure wins. */
@@ -408,14 +481,31 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
           : fail(outcome, outcome.output);
       }
 
-      // --- other stages (regression, integrate, …): coarse exit-code gates ---
+      // Capture a benchmark baseline when a stage produces one (the optimization baseline stage),
+      // so the later bench-gate has a real number to compare against.
+      if (stage?.produces.includes('benchmark') && commands.benchmark) {
+        const res = await runCheck('benchmark', commands.benchmark, wt.path);
+        const value = parseBenchmark(res.output);
+        if (value !== null) {
+          const file = benchmarkBaselinePath(repoPath, ticketId);
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, JSON.stringify({ value }), 'utf8');
+        }
+      }
+
+      // --- other stages: automated gates (specialist checks run REAL implementations) ---
       const checks = template.gates
         .filter((g) => g.after === task.stageId && g.kind === 'automated')
         .flatMap((g) => g.checks ?? []);
       for (const check of checks) {
-        const cmd = commands[check];
-        if (!cmd) continue;
-        const res = await runCheck(check, cmd, wt.path);
+        const res = await evalGateCheck(
+          check,
+          repoPath,
+          wt.path,
+          ticketId,
+          outcome.changedFiles,
+          commands,
+        );
         if (!res.ok) return fail(outcome, res.output);
       }
       return outcome.ok

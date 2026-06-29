@@ -5,6 +5,7 @@
 // invoke chokepoint).
 import type { AgentConfig, AgentRole, GateDef, WorkflowTemplate } from '@thaloslab/shared';
 import { agentFromRole, clampSynthesized } from '../roster/role-defaults';
+import { UNIMPLEMENTED_CHECKS } from '../specialist-gates';
 import type { TriageResult } from '../triage';
 
 export interface Assembly {
@@ -75,6 +76,28 @@ export function assemble(
     ];
     assembled = { ...template, gates: [...template.gates, ...extraGates] };
   }
+
+  // No-silent-no-op: any automated gate check with NO automated implementation (e.g. visual-diff)
+  // is split out into a blocking HUMAN gate that parks the ticket — never a silent green.
+  const converted: GateDef[] = [];
+  for (const g of assembled.gates) {
+    const unimpl =
+      g.kind === 'automated' ? (g.checks ?? []).filter((c) => UNIMPLEMENTED_CHECKS.has(c)) : [];
+    if (unimpl.length === 0) {
+      converted.push(g);
+      continue;
+    }
+    const real = (g.checks ?? []).filter((c) => !UNIMPLEMENTED_CHECKS.has(c));
+    if (real.length > 0) converted.push({ ...g, checks: real });
+    converted.push({
+      id: `${g.id}-manual`,
+      kind: 'human',
+      after: g.after,
+      prompt: `Manual review required — no automated check for: ${unimpl.join(', ')}`,
+      blocking: true,
+    });
+  }
+  assembled = { ...assembled, gates: converted };
 
   return { template: assembled, roster, roleAgentId };
 }

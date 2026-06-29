@@ -49,6 +49,24 @@ describe('assemble: data-driven roster + gate policy', () => {
   });
 });
 
+describe('no-silent-no-op: unimplemented specialist gate → blocking human gate', () => {
+  it('converts a redesign visual-diff automated check into a human gate, keeping a11y automated', () => {
+    const triage: TriageResult = { ...base, taskType: 'redesign', blastRadius: [] };
+    const { template } = assemble('p1', triage, selectTemplate('redesign'));
+
+    // The original visual-a11y automated gate no longer carries visual-diff…
+    const automated = template.gates.find((g) => g.id === 'visual-a11y');
+    expect(automated?.kind).toBe('automated');
+    expect(automated?.checks).toContain('a11y');
+    expect(automated?.checks).not.toContain('visual-diff');
+
+    // …it became a blocking HUMAN gate that parks the ticket (never a silent green).
+    const manual = template.gates.find((g) => g.id === 'visual-a11y-manual');
+    expect(manual).toMatchObject({ kind: 'human', blocking: true, after: 'implement' });
+    expect(manual?.prompt).toContain('visual-diff');
+  });
+});
+
 describe('least-privilege clamp + tool derivation (the invoke chokepoint)', () => {
   const synthesized: AgentConfig = {
     id: 'x',

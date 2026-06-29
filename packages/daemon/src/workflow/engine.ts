@@ -407,6 +407,16 @@ export function createEngine(deps: EngineDeps) {
       if (!parent) continue;
       const childStageId = stage.fanOut.childStageId;
       if (tasks.some((t) => t.stageId === childStageId)) continue; // already expanded
+      // Don't build before sign-off: if a human gate sits after the architect, wait until it's
+      // resolved (passed/done) before materializing engineer lanes.
+      const pendingSignoff = tasks.find(
+        (t) =>
+          t.kind === 'gate' &&
+          t.dependsOn.includes(stage.id) &&
+          t.state !== 'passed' &&
+          t.state !== 'done',
+      );
+      if (pendingSignoff) continue;
 
       const items = readDecomposition(repoPath, ticketId);
       const min = stage.fanOut.minChildren ?? 1;

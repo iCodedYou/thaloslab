@@ -36,6 +36,7 @@ export function detectGateCommands(repoPath: string, runner = 'pnpm'): GateComma
   if (scripts.typecheck) map.typecheck = { command: runner, args: ['run', 'typecheck'] };
   if (scripts.lint) map.lint = { command: runner, args: ['run', 'lint'] };
   if (scripts.test) map.unit = { command: runner, args: ['run', 'test'] };
+  if (scripts.benchmark) map.benchmark = { command: runner, args: ['run', 'benchmark'] };
   return map;
 }
 
