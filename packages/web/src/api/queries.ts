@@ -97,6 +97,55 @@ export function useUpdateAgent() {
   });
 }
 
+// ---- Collab (SPEC §11) ----
+
+export interface CollabPeerView {
+  peerId: string;
+  vendors: string[];
+  sandboxOk: boolean;
+  joinRequested: boolean;
+  admitted: boolean;
+  revoked: boolean;
+  routable: boolean;
+}
+export interface CollabState {
+  active: boolean;
+  peers: CollabPeerView[];
+}
+export interface PersistedManifest {
+  runId: string;
+  peerId: string;
+  createdAt: number;
+  entries: { path: string; sha256: string; bytes: number }[];
+  excluded: string[];
+}
+
+export function useCollab() {
+  return useQuery({
+    queryKey: ['collab'],
+    queryFn: () => apiGet<CollabState>('/api/collab'),
+    refetchInterval: 3000,
+  });
+}
+
+export function useCollabManifests(projectId?: string) {
+  return useQuery({
+    queryKey: ['collab-manifests', projectId],
+    queryFn: () => apiGet<PersistedManifest[]>(`/api/collab/${projectId}/manifests`),
+    enabled: Boolean(projectId),
+    refetchInterval: 4000,
+  });
+}
+
+/** POST a collab control action (enable/disable/admit/revoke) and refresh the state. */
+export function useCollabAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (path: string) => apiPost<CollabState>(path, {}),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['collab'] }),
+  });
+}
+
 export function useResolveGate() {
   const qc = useQueryClient();
   return useMutation({

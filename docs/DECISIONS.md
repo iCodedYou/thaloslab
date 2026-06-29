@@ -35,6 +35,8 @@
 | 25 | Neutral permission policy | the engine speaks a vendor-neutral `ToolPolicy`; each adapter's `enforce(policy)→{args,unmet}` translates it, declaring what it CANNOT express — `unmet` is the router's fail-closed filter |
 | 26 | Constraint-aware cross-provider routing | the router picks the provider (engine never does), FAIL-CLOSED: only providers that can enforce the role's policy are eligible; reviewer MUST differ from the engineer's provider, auditor PREFERs; nothing eligible → PARK/escalate, never run unconstrained |
 | 27 | Greenfield bootstrapping + phase transition | a scratch project's first ticket runs the greenfield workflow (phase-driven); the baseline is BORN by the scaffold; `done` flips bootstrapping→maintenance; the MVP NEVER auto-lands on `main` (no exception); integration-sweep (full acceptance suite) is the "MVP exists" gate |
+| 28 | OS sandbox — self-test is the pre-trust gate | the sandbox is the 4th, OUTERMOST defense-in-depth layer (makes pathScope + network:none REAL); "verified" = a real escape probe was DENIED, never "binary present"; local = sandbox-when-available (DiD floor), collab = sandbox-REQUIRED (fail-closed); a verified jail relaxes the per-command-allowlist unmet (never network-allowlist) — relaxation per-invocation only, sharing one flag with the spawn so "relaxed-but-not-wrapped" is impossible |
+| 29 | Collab trust — three-legged threat model | (1) the executor's sandbox protects it FROM the task (sandbox-required); (2) the host's gates + host-git changedFiles + quarantine + reviewer-differs-by-VENDOR protect the codebase FROM untrusted peer output; (3) data confidentiality is ONE-WAY/no-claw-back — minimize (allowlist pack, secret-strip-that-aborts) + inform (host-visible manifest); creds never cross; token + EXPLICIT human admit + revoke |
 
 ---
 
@@ -265,9 +267,86 @@ reconcile's repeats + terminal-absorb); DB authoritative, `.thalos/config.json` 
 separate human-authorized action (the highest-stakes land — last to automate), uniform across all
 tickets. *Refines SPEC §6 + §7.*
 
+### 28. OS sandbox — the deferred least-privilege backstop; self-test is the pre-trust gate (Phase 5)
+
+The sandbox is the **4th, OUTERMOST** layer of the SPEC §9 defense-in-depth (it composes with — does
+not replace — the path-audit, provider flags, denylist). It is the only layer that makes `pathScope`
+and `network:none` **OS-REAL** rather than advisory (today a subprocess inherits full network and can
+`curl`, and the path "scope" is a post-hoc `git status`). All FOUR spawn sites route through one
+`spawnSandboxed` chokepoint — the 3 adapters AND the gate runner (`pnpm test` runs arbitrary repo
+code; unwrapped it is the jail's escape hatch).
+
+- **"Verified" = a real escape was PROVEN blocked**, never "the binary is present." The self-test runs
+  a probe under a denying scope and is `ok` ONLY if the probe was denied — fs by **host-readback** (did
+  the probe's write reach a HOST file? — correct for both namespace jails *and* containers, whose fs is
+  writable-but-host-isolated), net by the probe's reachability. A present-but-misconfigured jail fails
+  its self-test and is treated EXACTLY like `NoopSandbox` (not trusted). Cached by `(id, version, os)`.
+- **Posture:** local = **sandbox-when-available** (the existing layers are the documented floor —
+  single-user v1 doesn't require OS containment; `--require-sandbox` opts in); collab = **sandbox-
+  REQUIRED, fail-closed**. **Containment (wrap this run?) and relaxation (drop an unmet?) are SEPARATE:**
+  relaxation is strict EVERYWHERE.
+- **Router interaction (the un-pin):** a verified `fs-scope`+`network-none` jail makes the per-command
+  allowlist's *purpose* (blast-radius containment) moot at the OS level → its `unmet` is dropped → a
+  Codex/Gemini builder becomes capable. This is NOT "the CLI now expresses the allowlist." **Hard
+  asymmetry: `network-allowlist` is NEVER jail-satisfiable** (no per-domain filtering) — only
+  `network:none` is, so a `network:allowlist` policy stays pinned even sandboxed (the proxy is
+  DEFERRED). The relaxation and the spawn share ONE `requiredByRouter` flag, so "relaxed-but-not-
+  wrapped" is structurally impossible. *Refines SPEC §5 + §9 + §14.*
+
+### 29. Collab — the three-legged threat model (Phase 5)
+
+Pooling moves the trust boundary off the machine. The spine has THREE legs — the third is categorically
+different (no after-the-fact backstop):
+
+1. **Execution containment** — the EXECUTOR's sandbox protects it FROM the task. A peer runs every
+   pooled invocation in ITS OWN verified jail and re-enforces the `ToolPolicy` on its side; a peer with
+   no verified sandbox is **unroutable** (this is *why* the sandbox is the prerequisite). Reversible: n/a.
+2. **Output integrity** — the HOST's gates protect the codebase FROM untrusted peer output. The peer
+   returns a patch (DATA, never an effect); the host applies it in a **quarantine** worktree, derives
+   `changedFiles` from its OWN git (never the peer's self-report), re-runs ALL gates, runs the seam
+   audit, and applies **reviewer-differs by VENDOR** (a `collab:peer:codex` is not a valid differ for a
+   local `codex` engineer). Reversible: yes — re-checked after.
+3. **Data confidentiality** — **ONE-WAY, no claw-back.** Once the context pack crosses, a consented peer
+   can read it; nothing re-checks what already left. The only lever is **MINIMIZE** (allowlist-first
+   pack, never whole-repo; a secret deny-net + a content scan that ABORTS the build, never warns) +
+   **INFORM** (a host-visible manifest — path+sha256 of exactly what crossed). **The residual is
+   ACCEPTED, not mitigated:** a consented peer reads the pack; that is the cost of pooling, made minimal
+   and informed, not reversible.
+
+Transport: a SEPARATE authenticated endpoint (not the zero-auth localhost ws), bound to LAN/tunnel ONLY
+while active+consented; **one-time token + EXPLICIT human admit** (a valid token alone never authorizes)
++ revoke; creds NEVER cross — the invoke carries the neutral `ToolPolicy` + a context ref, never API
+keys. *Refines SPEC §11 + §14.*
+
 ---
 
 ## Deferred / open items (named, not silently skipped)
+
+### Phase 5 — sandbox + collab (the value of this phase is that its gaps are NAMED)
+
+The trust LOGIC is proven on the Windows build machine (self-test decision logic, router relaxation,
+the three collab axes via an in-process mock peer). REAL confinement and the REAL wire are deferred
+behind self-tests/mocks that run **for real on-target before trust** — exactly like Phase 3's
+deferred-pending-install. A reader must not mistake a deferred jail for a verified one.
+
+**Cross-platform sandbox — what is verified vs deferred:**
+
+| OS | Backend | Verified on hardware here? | Status |
+|---|---|---|---|
+| Linux | bubblewrap (rootless userns) — **implemented** | **No** (no Linux/WSL on the build box) | **DEFERRED-PENDING-LINUX** |
+| macOS | sandbox-exec / Lima — not yet implemented | No | **DEFERRED-PENDING-MACOS** |
+| Windows (this box) | WSL2 / Docker — neither present → **NoopSandbox** | n/a (no real jail) | local unsandboxed (DiD floor), collab fail-closed |
+
+- **DEFERRED-PENDING-LINUX / -MACOS:** the bubblewrap (and a future sandbox-exec) jail's REAL confinement.
+  The self-test runs the real escape probe on-target and trusts the jail ONLY if the probe is denied.
+  *First thing to run when a Linux/macOS box is available.* Until then: present-but-unverified ⇒ treated
+  as Noop (no relaxation, collab fail-closed).
+- **DEFERRED-PENDING-MULTI-MACHINE:** the real cross-machine collab wire (the Fastify collab endpoint +
+  tunnel + a real remote peer). The in-process mock peer proves the trust/strip/quarantine LOGIC; it does
+  NOT prove a real remote peer over a real wire behaves. *First thing to run when a second machine is
+  available.*
+- **DEFERRED (no target needed):** the per-domain network-allowlist filtering proxy — `network:none` is
+  the only jail-enforceable posture, so a `network:allowlist` policy stays Claude-pinned even sandboxed.
 
 **DEFERRED-PENDING-BUDGET (Phase 4 — the `--live` greenfield smoke).** Greenfield is the largest
 single token spend in the project (a full MVP from nothing). The deterministic `--mock` bar is the
@@ -315,5 +394,7 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§6** — `phase` is load-bearing: a bootstrapping scratch project runs the greenfield workflow (phase-driven intake); `done` flips bootstrapping→maintenance, bound to reconcile's done-path; the scaffold BORNS the baseline so ticket #2 gets differential gating back (#27).
 - **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23); greenfield gating is ABSOLUTE (gate commands read from the worktree; integration-sweep is the MVP-exists gate with teeth); the MVP never auto-lands on `main` (#27). The `--live` greenfield smoke is DEFERRED-PENDING-BUDGET (above).
 - **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
+- **§11** — collab is a THREE-legged threat model (#29): executor-sandbox / host-gates+quarantine+differ-by-vendor / one-way data-confidentiality (minimize+inform, residual accepted); token + explicit human admit + revoke; creds never cross. The real cross-machine wire is DEFERRED-PENDING-MULTI-MACHINE (above).
+- **§14** — the OS sandbox is the 4th, outermost defense-in-depth layer making pathScope+network:none REAL; "verified" = a real escape was DENIED (self-test, host-readback), never "binary present"; local = sandbox-when-available, collab = sandbox-REQUIRED fail-closed (#28). Real confinement is DEFERRED-PENDING-LINUX/MACOS; per-domain network-allowlist deferred (only network:none is jail-enforceable).
 - **§15** — OS sandboxing gates Phase 5 (ships with collab), not Phase 6.
 - **CLAUDE.md** — gate toolchain pinned (Vitest/ESLint/tsc/Prettier) + aggregate `gate` + pre-commit hook (#16); migrate full schema up front, repositories only for tables a phase uses (#19).

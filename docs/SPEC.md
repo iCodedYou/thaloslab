@@ -811,6 +811,26 @@ The app runs AI agents that execute code on the user's machine, so safety is fir
 - **Collab trust** as in [§11](#11-collab-mode): explicit consent, token-gated joins, scoped sharing, attribution.
 - **OS sandboxing:** deferred for single-user v1 (worktree path-scoping, git recoverability, the preview default, and the gates cover that threat model), but a **prerequisite for collab** — agent subprocesses run inside an OS-level sandbox/container (filesystem + network jailed to the worktree), shipping with or before Phase 5. Pooling does not ship without it.
 
+> **Phase 5 resolved — sandbox + collab ([DECISIONS](DECISIONS.md) #28, #29).** The sandbox is the
+> 4th, OUTERMOST defense-in-depth layer (it makes `pathScope` + `network:none` OS-REAL, not advisory),
+> routed through one `spawnSandboxed` chokepoint covering BOTH the adapters and the gate runner.
+> **"Verified" = a real escape probe was DENIED** (self-test, fs by host-readback so it's correct for
+> namespace jails AND containers), never "the binary is present" — a present-but-misconfigured jail is
+> treated exactly like no jail. **Local = sandbox-when-available** (the existing layers are the floor);
+> **collab = sandbox-REQUIRED, fail-closed.** A verified `fs+network-none` jail un-pins Codex/Gemini
+> builders (the per-command allowlist's containment is delivered by the OS), but **`network-allowlist`
+> is never jail-enforceable** (only `network:none` is). **Collab is a three-legged threat model:**
+> executor-sandbox (axis 1) / host gates+quarantine+host-git changedFiles+differ-by-VENDOR (axis 2) /
+> **one-way data confidentiality** (axis 3 — minimize via allowlist pack + secret-strip-that-aborts,
+> inform via a host-visible manifest; the residual that a consented peer reads the pack is ACCEPTED,
+> not reversible). Token + explicit human admit + revoke; creds never cross.
+>
+> **DEFERRED, named (run for real on-target before trust):** real bubblewrap/sandbox-exec confinement
+> → DEFERRED-PENDING-LINUX / -MACOS (the self-test is the pre-trust gate; this Windows box has no
+> Linux/WSL/Docker, so no real jail is verifiable here — NoopSandbox, collab fail-closed); the real
+> cross-machine collab wire → DEFERRED-PENDING-MULTI-MACHINE (the in-process mock peer proves the trust
+> logic); the per-domain network-allowlist filtering proxy → DEFERRED.
+
 ---
 
 ## 15. Implementation roadmap

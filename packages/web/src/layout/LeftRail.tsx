@@ -5,6 +5,7 @@ const NAV = [
   { id: 'orchestrator', label: 'Orchestrator' },
   { id: 'tickets', label: 'Tickets' },
   { id: 'agents', label: 'Agents' },
+  { id: 'collab', label: 'Collab' },
   { id: 'settings', label: 'Settings' },
 ];
 

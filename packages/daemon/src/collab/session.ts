@@ -74,4 +74,20 @@ export class CollabHost {
     const s = this.sessions.get(peerId);
     return !!s && s.admitted && !s.revoked;
   }
+
+  /** The admit/revoke state for the UI — so the human-admit step is explicit + visible. */
+  sessionView(peerId: string): {
+    exists: boolean;
+    joinRequested: boolean;
+    admitted: boolean;
+    revoked: boolean;
+  } {
+    const s = this.sessions.get(peerId);
+    return {
+      exists: !!s,
+      joinRequested: !!s?.joinRequested,
+      admitted: !!s?.admitted,
+      revoked: !!s?.revoked,
+    };
+  }
 }
