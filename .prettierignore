@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+pnpm-lock.yaml
+packages/daemon/migrations/
+*.tsbuildinfo
+
+# Hand-authored docs/specs — keep their intentional tables, wrapping, and structure.
+docs/
+CLAUDE.md
+README.md

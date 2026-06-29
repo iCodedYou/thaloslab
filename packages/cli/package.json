@@ -1,0 +1,26 @@
+{
+  "name": "@thaloslab/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "thaloslab": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup",
+    "typecheck": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.8.2",
+    "@thaloslab/daemon": "workspace:*",
+    "@thaloslab/shared": "workspace:*",
+    "commander": "^12.1.0",
+    "open": "^10.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2"
+  }
+}

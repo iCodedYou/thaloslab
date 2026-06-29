@@ -1,0 +1,24 @@
+/* Design tokens (SPEC §12, frontend-design direction: Linear / Raycast / Warp).
+   Dark-first, near-black layered surfaces, hairline borders, ONE restrained accent, semantic
+   status colors reserved for run state, sans/mono pairing. Tailwind v4 turns these into utilities
+   (bg-surface, text-dim, border-line, font-mono, …) and CSS variables. */
+@theme {
+  --color-bg: #0b0c0e;
+  --color-surface: #131519;
+  --color-raised: #1a1d22;
+  --color-line: #24272e;
+
+  --color-fg: #e6e8ec;
+  --color-dim: #9aa0aa;
+  --color-faint: #6b7280;
+
+  --color-accent: #6e8bff;
+  --color-accent-soft: #2c3970;
+
+  --color-ok: #3fb950;
+  --color-warn: #d29922;
+  --color-danger: #f85149;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+}

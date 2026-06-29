@@ -1,0 +1,20 @@
+{
+  "name": "@thaloslab/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "build:watch": "tsc -b --watch --preserveWatchOutput",
+    "typecheck": "tsc -b",
+    "clean": "tsc -b --clean"
+  }
+}

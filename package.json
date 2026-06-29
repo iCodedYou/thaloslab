@@ -1,0 +1,46 @@
+{
+  "name": "thalos-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "volta": {
+    "node": "22.11.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @thaloslab/shared build && pnpm --filter @thaloslab/web build && pnpm --filter @thaloslab/daemon build && pnpm --filter @thaloslab/cli build",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "gate": "pnpm typecheck && pnpm lint && pnpm test",
+    "dev": "pnpm --filter @thaloslab/shared build && concurrently -k -n shared,daemon,web \"pnpm --filter @thaloslab/shared build:watch\" \"pnpm --filter @thaloslab/daemon dev\" \"pnpm --filter @thaloslab/web dev\"",
+    "postinstall": "node scripts/check-native.mjs",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,css,yaml,yml}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.0",
+    "eslint": "^9.16.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  }
+}

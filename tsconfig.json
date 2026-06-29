@@ -1,0 +1,10 @@
+{
+  "//": "Solution file: `tsc -b` builds packages in dependency order. References are added as each package is scaffolded (Phase 0).",
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/daemon" },
+    { "path": "packages/cli" },
+    { "path": "packages/web" }
+  ]
+}

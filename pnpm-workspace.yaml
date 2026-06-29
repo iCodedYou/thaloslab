@@ -1,0 +1,14 @@
+packages:
+  - 'packages/*'
+
+# Build-script approvals (supply-chain policy gate in this environment).
+# - esbuild: downloads its own platform binary; required by vite/vitest/tsup.
+# - better-sqlite3: fetches/builds its native SQLite binding (docs/DECISIONS.md #16/#19).
+allowBuilds:
+  esbuild: true
+  better-sqlite3: true
+
+# pnpm-native declaration of the same set (kept in sync with allowBuilds above).
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild
