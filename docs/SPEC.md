@@ -433,6 +433,8 @@ interface GateDef {
 }
 ```
 
+> **Phase 2 resolved — assembly + specialist-gate realness ([DECISIONS](DECISIONS.md) #24).** Triage assembles the **roster + gate-config from data**, not a hardcoded team per template: a non-empty **blast radius** pulls in the security auditor + a mandatory `security` gate + a blocking human deploy gate. `StageDef.fanOut` lets the architect's stage expand at runtime into N engineer lanes (one per decomposition seam), with the integrate stage's `dependsOn` acting as the all-of barrier. Every declared blocking gate is **real or loud**: specialist checks run honest implementations (security = secret + dangerous-pattern scan + dependency audit; benchmark = baseline-vs-after; a11y = rule-based HTML inspection), and a check with **no automated implementation** (visual-diff) is converted at assembly into a blocking **human** gate that parks the ticket — never a silent green.
+
 ### Stage execution and the task-graph state machine
 
 The engine walks the DAG. Each task node has a state:
@@ -508,6 +510,8 @@ Parallel engineers do not share a working directory. Each parallelizable task ru
 - Tasks are decomposed by the architect along clean module/service seams to minimize cross-task collisions.
 - The **integrator** merges task branches into the integration branch one at a time, resolving conflicts, then runs the full integration/e2e suite. This is where "works alone, breaks together" bugs surface.
 - Worktrees are torn down after successful integration; their branches and diffs are retained as artifacts.
+
+> **Phase 2 resolved — the lane model + conflict posture ([DECISIONS](DECISIONS.md) #22, #23).** Isolation is a **lane**: one branch + worktree + gate-state per `laneId`. Sequential stages share `<ticketId>:main`; parallel fan-out engineers get isolated `<ticketId>:seam-<i>` lanes off `thalos/integration`, each owning a declared `seamPaths` seam enforced by a post-run path-ownership audit. A builder's work is **committed to its lane branch** after its gates pass; the integrator merges every lane branch *ahead of integration* into `thalos/integration` — **never the default branch** (landing there is a separate human action). On a real merge conflict the integrator runs a **bounded, merge-scoped** resolver and re-gates the full suite before accepting; **blast-radius** changes (auth/payments/data/infra) **escalate immediately** with no agent touching the markers. After all merges, the full suite re-runs against the pre-integration baseline — the works-alone-breaks-together backstop.
 
 ### Permission enforcement (defense in depth)
 

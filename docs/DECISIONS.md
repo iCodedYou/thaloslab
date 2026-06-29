@@ -29,6 +29,9 @@
 | 19 | Schema vs repositories | migrate full schema up front; build repositories only for tables a phase uses |
 | 20 | Default daemon port | fixed `8473` with ephemeral fallback (4317 = OTLP, collides) |
 | 21 | `shared` consumption | compiled to `dist/` and consumed compiled, not inlined from `.ts` source |
+| 22 | Worktree topology — the lane model | one branch + worktree + gate-state per **lane**; sequential stages share a lane, fan-out engineers get isolated lanes; integration merges into `thalos/integration` only, never the default branch |
+| 23 | Merge-conflict posture | bounded, merge-scoped auto-resolve + full-gate re-check before accept; blast-radius changes escalate **immediately** (no agent touches sensitive merge markers) |
+| 24 | Specialist-gate realness — no silent no-op | every declared blocking gate either runs a real check or converts to a blocking **human** gate; a gate may never report green having run nothing |
 
 ---
 
@@ -175,6 +178,36 @@ The daemon's preferred port is `8473`, falling back to an OS-assigned ephemeral 
 
 ---
 
+### 22. Worktree topology — **the lane model** (resolved during Phase 2)
+
+Isolation is expressed by a **lane**: one git branch + one worktree + one gate-state file, identified by a `laneId` on each task. This makes both topologies fall out of *who shares a laneId*, instead of one assumption overwriting the other:
+
+- **Sequential stages share a lane** (`<ticketId>:main`) — e.g. the bug-fix's repro→fix→review run in one worktree so the reproduction test reaches the engineer.
+- **Parallel fan-out children get isolated lanes** (`<ticketId>:seam-<i>`) — each engineer builds in its own worktree off `thalos/integration`, on a clean module/service seam the architect declared. The seam is **path ownership** (`task.seamPaths`), enforced by the post-run audit (a write outside the seam fails the run).
+
+Lane branches are created **idempotently** (adopt-or-create) so a crash that loses the in-memory worktree cache but leaves the lane on disk recovers cleanly. A builder's work is **committed to its lane branch** after its gates pass; the integrator merges every lane branch that is *ahead of integration* (covering both topologies) into `thalos/integration` — **never** the repo's default branch. Landing on the default branch remains a separate, explicit human action.
+
+*Refines SPEC §9.*
+
+### 23. Merge-conflict posture — **bounded auto-resolve, blast-radius escalates immediately** (resolved during Phase 2)
+
+The integrator merges lane branches one at a time, deterministically. On a real `git` conflict:
+
+- if the change's **blast radius is non-empty** (auth / payments / data / infra) → **escalate immediately**; no agent touches sensitive merge markers.
+- otherwise → a **bounded** (≤2), **merge-scoped** resolver agent edits *only* the conflict markers (it may not rewrite logic to force a green build), and the **full gate suite must pass** before the merge is accepted. Exhausting the bound, or a red re-gate, aborts the merge (leaving integration clean) and escalates with the conflicted files.
+
+After all lanes merge cleanly, the **full suite runs once more** against the pre-integration baseline — the "works-alone, breaks-together" backstop that catches a semantically broken combination the per-merge gate can't see.
+
+*Refines SPEC §7 / §9.*
+
+### 24. Specialist-gate realness — **no silent no-op** (resolved during Phase 2)
+
+A declared blocking gate may **never** report green having run nothing. Specialist gates run honest checks — security (secret + dangerous-pattern scan + dependency audit), benchmark (real baseline-vs-after measurement), a11y (rule-based HTML inspection). A gate check with **no automated implementation** (e.g. visual-diff) is **converted at assembly into a blocking human gate** that parks the ticket for manual review; the runner also blocks loudly as defense in depth. The roster + gate-config are **assembled from triage data** (blast radius → security auditor + mandatory security gate + human deploy gate), not hardcoded per template.
+
+*Refines SPEC §7.*
+
+---
+
 ## Spec refinements implied by these decisions
 
 For the handoff, the points where this file supersedes a `SPEC.md` default:
@@ -186,5 +219,7 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§9** — GitHub optional, not required; engineer network defaults to allowlist (not none); local repo always created, GitHub create/push best-effort → local-only (#18).
 - **§10** — track `agents/` + `config.json`; gitignore `artifacts/` + `worktrees/` + `runs.log` by default; one global SQLite DB holds all tables incl. artifact index, `.thalos/` holds bytes (#14).
 - **§11** — default collab sharing scope = brief + worktree + interface context pack, secrets stripped.
+- **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23).
+- **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
 - **§15** — OS sandboxing gates Phase 5 (ships with collab), not Phase 6.
 - **CLAUDE.md** — gate toolchain pinned (Vitest/ESLint/tsc/Prettier) + aggregate `gate` + pre-commit hook (#16); migrate full schema up front, repositories only for tables a phase uses (#19).
