@@ -18,6 +18,24 @@ export interface Worktree {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Per-repo serialization for git operations that mutate the SHARED .git (config, worktrees, refs).
+// Parallel fan-out lanes each call `git worktree add` + `git config core.autocrlf` on the same repo;
+// run concurrently they collide on `.git/config.lock` ("could not lock config file … File exists").
+// This queue makes those mutations sequential per repo while the agent work itself stays parallel.
+const repoGitLock = new Map<string, Promise<unknown>>();
+function withRepoLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+  const prev = repoGitLock.get(repoPath) ?? Promise.resolve();
+  const run = prev.then(fn, fn); // run AFTER the previous op settles, regardless of its outcome
+  repoGitLock.set(
+    repoPath,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
 function worktreeDir(repoPath: string, name: string): string {
   return path.join(repoPath, THALOS_DIR_NAME, THALOS_WORKTREES_DIR, name);
 }
@@ -42,27 +60,29 @@ export async function ensureIntegrationBranch(repoPath: string): Promise<void> {
  * lost, so we adopt an existing dir, or re-add a worktree on an existing branch, rather than throwing.
  */
 export async function createWorktree(repoPath: string, laneId: string): Promise<Worktree> {
-  await ensureIntegrationBranch(repoPath);
-  const slug = laneSlug(laneId);
-  const branch = `thalos/lane-${slug}`;
-  const wtPath = worktreeDir(repoPath, `lane-${slug}`);
-  const git = simpleGit(repoPath);
+  return withRepoLock(repoPath, async () => {
+    await ensureIntegrationBranch(repoPath);
+    const slug = laneSlug(laneId);
+    const branch = `thalos/lane-${slug}`;
+    const wtPath = worktreeDir(repoPath, `lane-${slug}`);
+    const git = simpleGit(repoPath);
 
-  if (!fs.existsSync(wtPath)) {
-    const branches = await git.branchLocal();
-    const args = branches.all.includes(branch)
-      ? ['worktree', 'add', wtPath, branch] // branch survived a crash; re-attach a worktree
-      : ['worktree', 'add', '-b', branch, wtPath, INTEGRATION_BRANCH];
-    await git.raw(args);
-  }
-  // EOL hardening — fix the cause, since changedFiles feeds the no-progress heuristic:
-  //   (layer 1, source) a worktree-local .gitattributes makes git normalize line endings in diffs,
-  //   so a Windows CRLF checkout no longer shows every file as modified. Combined with
-  //   core.autocrlf=false and the --ignore-cr-at-eol diff in util/git.ts (layer 2).
-  await simpleGit(wtPath).addConfig('core.autocrlf', 'false', false, 'local');
-  const gitattrs = path.join(wtPath, '.gitattributes');
-  if (!fs.existsSync(gitattrs)) fs.writeFileSync(gitattrs, '* text=auto eol=lf\n', 'utf8');
-  return { laneId, path: wtPath, branch };
+    if (!fs.existsSync(wtPath)) {
+      const branches = await git.branchLocal();
+      const args = branches.all.includes(branch)
+        ? ['worktree', 'add', wtPath, branch] // branch survived a crash; re-attach a worktree
+        : ['worktree', 'add', '-b', branch, wtPath, INTEGRATION_BRANCH];
+      await git.raw(args);
+    }
+    // EOL hardening — fix the cause, since changedFiles feeds the no-progress heuristic:
+    //   (layer 1, source) a worktree-local .gitattributes makes git normalize line endings in diffs,
+    //   so a Windows CRLF checkout no longer shows every file as modified. Combined with
+    //   core.autocrlf=false and the --ignore-cr-at-eol diff in util/git.ts (layer 2).
+    await simpleGit(wtPath).addConfig('core.autocrlf', 'false', false, 'local');
+    const gitattrs = path.join(wtPath, '.gitattributes');
+    if (!fs.existsSync(gitattrs)) fs.writeFileSync(gitattrs, '* text=auto eol=lf\n', 'utf8');
+    return { laneId, path: wtPath, branch };
+  });
 }
 
 export interface ScopeAudit {
@@ -94,12 +114,14 @@ export async function captureDiff(repoPath: string, branch: string): Promise<str
 
 /** A persistent worktree checked out on the integration branch, used to merge into it. */
 export async function ensureIntegrationWorktree(repoPath: string): Promise<string> {
-  await ensureIntegrationBranch(repoPath);
-  const wtPath = worktreeDir(repoPath, 'integration');
-  if (!fs.existsSync(wtPath)) {
-    await simpleGit(repoPath).raw(['worktree', 'add', wtPath, INTEGRATION_BRANCH]);
-  }
-  return wtPath;
+  return withRepoLock(repoPath, async () => {
+    await ensureIntegrationBranch(repoPath);
+    const wtPath = worktreeDir(repoPath, 'integration');
+    if (!fs.existsSync(wtPath)) {
+      await simpleGit(repoPath).raw(['worktree', 'add', wtPath, INTEGRATION_BRANCH]);
+    }
+    return wtPath;
+  });
 }
 
 /** Merge a task branch into `thalos/integration` (never the default branch). Aborts on conflict —

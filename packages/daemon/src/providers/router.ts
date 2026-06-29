@@ -14,6 +14,20 @@ import type {
 export type Differ = 'must' | 'prefer' | 'none';
 
 /**
+ * The underlying VENDOR of a provider id. Collab provider ids are `collab:<peerId>:<vendor>` so the
+ * reviewer-differs rule can compare the VENDOR, not the provider-id — otherwise a `collab:peerB:codex`
+ * reviewing a LOCAL `codex` engineer would pass the differ check (different id) while sharing the same
+ * vendor's blind spots (the whole point of adversarial independence is defeated).
+ */
+export function vendorOf(providerId: ProviderId): string {
+  if (providerId.startsWith('collab:')) {
+    const parts = providerId.split(':');
+    return parts[2] ?? parts[1] ?? providerId; // the vendor segment
+  }
+  return providerId;
+}
+
+/**
  * Constraints a VERIFIED sandbox makes moot for THIS invocation (Phase 5). The per-command allowlist's
  * PURPOSE is blast-radius containment; a verified fs-scope (+ network-none when the policy wants none)
  * jail delivers that radius at the OS level → the per-command rule is moot. This is NOT "the CLI now
@@ -84,10 +98,12 @@ export function resolveForInvoke(
   const primary = caps[0] as ProviderId;
   if (args.differ === 'none' || !args.avoidProvider) return { kind: 'ok', provider: primary };
 
-  const different = caps.filter((id) => id !== args.avoidProvider);
+  // Differ by VENDOR, not provider-id: a collab peer running the same vendor is NOT a valid differ.
+  const avoidVendor = vendorOf(args.avoidProvider);
+  const different = caps.filter((id) => vendorOf(id) !== avoidVendor);
   if (different.length > 0) return { kind: 'ok', provider: different[0] as ProviderId };
 
-  // Only the engineer's provider is capable.
+  // Only the engineer's vendor is capable.
   if (args.differ === 'must') {
     return { kind: 'ok', provider: args.avoidProvider, degraded: 'same-provider-fresh-context' };
   }
