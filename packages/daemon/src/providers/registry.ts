@@ -6,6 +6,7 @@ import type {
   ExecutionMode,
   ProviderAdapter,
   ProviderId,
+  SandboxCapability,
 } from '@thaloslab/shared';
 import { getProject } from '../store/repositories/projects';
 import { listProviders, upsertProvider } from '../store/repositories/providers';
@@ -13,7 +14,7 @@ import { claudeAdapter } from './claude';
 import { codexAdapter } from './codex';
 import { geminiAdapter } from './gemini';
 import { mockFor } from './mock';
-import type { RouterCtx } from './router';
+import { type RouterCtx, sandboxSatisfies } from './router';
 
 // Registration order is the default preference order (claude > codex > gemini), per-project overridable.
 const adapters: ProviderAdapter[] = [claudeAdapter, codexAdapter, geminiAdapter];
@@ -42,9 +43,12 @@ export function adapterFor(providerId: ProviderId, mode: ExecutionMode): Provide
 /**
  * Build the router context from live state: detected providers (availability), the project's
  * preference order (defaults to detection/registration order), and the per-provider `enforce` →
- * `unmet` filter (minus any constraints the policy marked `relaxable`).
+ * `unmet` filter (minus any constraints the policy marked `relaxable`, minus any constraint a VERIFIED
+ * sandbox makes moot for THIS invocation — Phase 5). `sandboxCaps` MUST already be the trusted set
+ * (empty unless the sandbox that WILL wrap this run passed its self-test); an unverified jail relaxes
+ * nothing, so the router can never un-pin a provider for a run that won't actually be confined.
  */
-export function routerCtx(projectId?: string): RouterCtx {
+export function routerCtx(projectId?: string, sandboxCaps: SandboxCapability[] = []): RouterCtx {
   const configured = projectId
     ? (getProject(projectId)?.routingPolicy?.preferenceOrder as ProviderId[] | undefined)
     : undefined;
@@ -54,7 +58,11 @@ export function routerCtx(projectId?: string): RouterCtx {
     unmetFor: (id, policy) => {
       const adapter = getAdapter(id);
       if (!adapter) return ['no-adapter'];
-      return adapter.enforce(policy).unmet.filter((u) => !policy.relaxable?.includes(u));
+      const satisfied = sandboxSatisfies(policy, sandboxCaps);
+      return adapter
+        .enforce(policy)
+        .unmet.filter((u) => !policy.relaxable?.includes(u))
+        .filter((u) => !satisfied.includes(u));
     },
   };
 }

@@ -15,10 +15,13 @@ import type {
   GateCheck,
   InvokeOptions,
   ProviderId,
+  SandboxBinding,
+  SandboxCapability,
   Ticket,
 } from '@thaloslab/shared';
-import { adapterFor, routerCtx as defaultRouterCtx } from '../providers/registry';
+import { adapterFor, getAdapter, routerCtx as defaultRouterCtx } from '../providers/registry';
 import { type RouterCtx, resolveForInvoke } from '../providers/router';
+import { detectSandbox, scopeFor, verifiedSelfTest } from '../providers/sandbox';
 import { getAgent } from '../store/repositories/agents';
 import { getProject } from '../store/repositories/projects';
 import { recentRunsForTask } from '../store/repositories/runs';
@@ -87,8 +90,10 @@ function resolveAgent(agentId: string | undefined, role: AgentRole | 'custom'): 
 export interface StageRunnerDeps {
   bus: EventBus;
   now?: () => number;
-  /** Injectable for tests (fail-closed / reviewer-differs). Defaults to the live registry context. */
-  routerCtx?: (projectId?: string) => RouterCtx;
+  /** Injectable for tests (fail-closed / reviewer-differs). Defaults to the live registry context.
+   *  `sandboxCaps` = constraints a VERIFIED jail makes moot for this run (Phase 5); the router relaxes
+   *  the unmet-set by them ONLY because the same run will actually be wrapped (see the binding below). */
+  routerCtx?: (projectId?: string, sandboxCaps?: SandboxCapability[]) => RouterCtx;
 }
 
 /** The engineer's ACTUAL provider for this change — read from the run of the task(s) this one
@@ -166,6 +171,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
     ticketId: string,
     changedFiles: string[],
     commands: ReturnType<typeof detectGateCommands>,
+    sandbox?: SandboxBinding,
   ): Promise<{ ok: boolean; output: string }> {
     if (check === 'security') return runSecurityScan(dir, changedFiles);
     if (check === 'a11y') {
@@ -200,7 +206,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       if (!cmd || baseline === null) {
         return { ok: false, output: 'benchmark: no command or baseline — blocked' };
       }
-      const res = await runCheck('benchmark', cmd, dir);
+      const res = await runCheck('benchmark', cmd, dir, undefined, sandbox);
       const current = parseBenchmark(res.output);
       if (current === null) return { ok: false, output: 'benchmark: unparseable output — blocked' };
       return benchmarkRegressed(baseline, current)
@@ -212,7 +218,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
     }
     const cmd = commands[check];
     if (!cmd) return { ok: true, output: '' }; // optional deterministic check the project omits
-    const res = await runCheck(check, cmd, dir);
+    const res = await runCheck(check, cmd, dir, undefined, sandbox);
     return { ok: res.ok, output: res.output };
   }
 
@@ -220,11 +226,12 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
   async function fullGateGreen(
     commands: ReturnType<typeof detectGateCommands>,
     dir: string,
+    sandbox?: SandboxBinding,
   ): Promise<{ ok: boolean; output: string }> {
     for (const check of ['build', 'typecheck', 'lint', 'unit'] as GateCheck[]) {
       const cmd = commands[check];
       if (!cmd) continue;
-      const res = await runCheck(check, cmd, dir);
+      const res = await runCheck(check, cmd, dir, undefined, sandbox);
       if (!res.ok) return { ok: false, output: `${check}: ${res.output.slice(0, 300)}` };
     }
     return { ok: true, output: '' };
@@ -252,8 +259,23 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
     // reaches main, and even in maintenance the merged tree may differ from the default branch.
     const commands = detectGateCommands(integDir);
 
+    // The integration sweep also runs arbitrary project code (`pnpm test` on the merged tree), so it
+    // is sandboxed under the integration worktree's scope when a verified jail is available.
+    const integHandle = detectSandbox();
+    const integSelfTest = await verifiedSelfTest(integHandle);
+    const integSandbox: SandboxBinding = {
+      handle: integHandle,
+      scope: scopeFor(
+        { network: 'allowlist', pathScope: 'project-repo' } as InvokeOptions['policy'],
+        integDir,
+        repoPath,
+      ),
+      verified: integSelfTest.ok,
+      requiredByRouter: process.env.THALOS_REQUIRE_SANDBOX === '1',
+    };
+
     const baseline = commands.unit
-      ? await runSuite(commands.unit, integDir, defaultSuiteParser)
+      ? await runSuite(commands.unit, integDir, defaultSuiteParser, undefined, integSandbox)
       : undefined;
 
     // Merge candidates: every distinct lane branch that carries built work (is ahead of
@@ -334,7 +356,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         });
         if (markersRemain()) continue; // resolver left markers → retry
         // Gate the resolved working tree; accept (commit) the merge ONLY if the full gate is green.
-        const gate = await fullGateGreen(commands, integDir);
+        const gate = await fullGateGreen(commands, integDir, integSandbox);
         if (gate.ok) {
           await commitMerge(integDir, `integrate ${branch} (conflict resolved)`);
           resolved = true;
@@ -352,7 +374,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
     }
 
     // Works-alone-breaks-together: the combined tree must build AND not regress the baseline.
-    const finalGate = await fullGateGreen(commands, integDir);
+    const finalGate = await fullGateGreen(commands, integDir, integSandbox);
     if (!finalGate.ok) {
       return {
         ok: false,
@@ -362,7 +384,13 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       };
     }
     if (commands.unit && baseline) {
-      const after = await runSuite(commands.unit, integDir, defaultSuiteParser);
+      const after = await runSuite(
+        commands.unit,
+        integDir,
+        defaultSuiteParser,
+        undefined,
+        integSandbox,
+      );
       const broke = newlyFailing(baseline, after);
       if (broke.length > 0) {
         return {
@@ -399,7 +427,16 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       const agent = resolveAgent(task.agentId, role);
       const policy = policyFor(agent);
       const differ = differFor(role);
-      const resolution = resolveForInvoke(buildRouterCtx(ticket?.projectId), {
+
+      // Phase 5: the platform sandbox + its self-test verdict. Capabilities are platform-level (not
+      // worktree-specific), so we learn them BEFORE the worktree and feed only the TRUSTED set (empty
+      // unless the self-test confirmed real confinement) to the router — it may un-pin Codex/Gemini
+      // ONLY because the same run will actually be wrapped (the binding below shares that fact).
+      const sandboxHandle = detectSandbox();
+      const selfTest = await verifiedSelfTest(sandboxHandle);
+      const sbxCaps = selfTest.ok ? sandboxHandle.capabilities() : [];
+
+      const resolution = resolveForInvoke(buildRouterCtx(ticket?.projectId, sbxCaps), {
         policy,
         avoidProvider: differ !== 'none' ? avoidProviderFor(ticketId, task) : undefined,
         differ,
@@ -418,6 +455,22 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       if (task.worktreePath !== wt.path) {
         updateTask(task.id, { worktreePath: wt.path, branch: wt.branch });
       }
+
+      // The sandbox binding for THIS run. requiredByRouter is true when the chosen provider was only
+      // capable BECAUSE the jail satisfied a constraint its CLI can't express (raw unmet non-empty) —
+      // or when --require-sandbox is set. When required, spawnSandboxed REFUSES if the jail isn't
+      // verified, so a relaxation can never run unconfined (the decision and the enforcement share
+      // this binding). When not required, local runs proceed unwrapped (defense-in-depth floor).
+      const rawUnmet =
+        getAdapter(providerId)
+          ?.enforce(policy)
+          .unmet.filter((u) => !policy.relaxable?.includes(u)) ?? [];
+      const sandbox: SandboxBinding = {
+        handle: sandboxHandle,
+        scope: scopeFor(policy, wt.path, repoPath),
+        verified: selfTest.ok,
+        requiredByRouter: process.env.THALOS_REQUIRE_SANDBOX === '1' || rawUnmet.length > 0,
+      };
       // Detect gate commands from the lane worktree (where the checks run), NOT the main repo: a
       // greenfield lane carries the scaffold's package.json that main does not yet have, and a
       // maintenance lane may itself modify the gate scripts. Reading repoPath would silently no-op
@@ -429,7 +482,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       // reproduction test it adds (the tests that newly fail).
       let baseline: SuiteResult | undefined;
       if (task.stageId === 'repro' && unitCmd) {
-        baseline = await runSuite(unitCmd, wt.path, defaultSuiteParser);
+        baseline = await runSuite(unitCmd, wt.path, defaultSuiteParser, undefined, sandbox);
       }
 
       const seamNote = task.seamPaths?.length
@@ -448,6 +501,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         policy,
         timeoutMs: 5 * 60_000,
         mode,
+        sandbox,
       };
       const outcome = await executeRun(provider, opts, {
         ticketId,
@@ -519,7 +573,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       // --- repro-red gate: the SPECIFIC new reproduction test must fail (not just suite-red) ---
       if (task.stageId === 'repro') {
         if (unitCmd && baseline) {
-          const after = await runSuite(unitCmd, wt.path, defaultSuiteParser);
+          const after = await runSuite(unitCmd, wt.path, defaultSuiteParser, undefined, sandbox);
           const reproTestIds = newlyFailing(baseline, after);
           if (reproTestIds.length === 0) {
             return fail(outcome, 'repro-red: no new failing reproduction test was added');
@@ -540,17 +594,17 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         for (const check of ['build', 'typecheck', 'lint'] as GateCheck[]) {
           const cmd = commands[check];
           if (!cmd) continue;
-          const res = await runCheck(check, cmd, wt.path);
+          const res = await runCheck(check, cmd, wt.path, undefined, sandbox);
           if (!res.ok) return fail(outcome, res.output);
         }
         const state = readGateState(repoPath, task.laneId);
         if (unitCmd && state) {
-          const current = await runSuite(unitCmd, wt.path, defaultSuiteParser);
+          const current = await runSuite(unitCmd, wt.path, defaultSuiteParser, undefined, sandbox);
           const verdict = fixSatisfiedAll(state.baselineGreen, state.reproTestIds, current);
           if (!verdict.ok) return fail(outcome, verdict.reason ?? 'fix gate not satisfied');
         } else if (unitCmd) {
           // No persisted repro state (e.g. recovery) — fall back to suite-green.
-          const res = await runCheck('unit', unitCmd, wt.path);
+          const res = await runCheck('unit', unitCmd, wt.path, undefined, sandbox);
           if (!res.ok) return fail(outcome, res.output);
         }
         if (outcome.ok) await commitWorktree(wt.path, `fix @ ${task.laneId}`);
@@ -562,7 +616,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       // Capture a benchmark baseline when a stage produces one (the optimization baseline stage),
       // so the later bench-gate has a real number to compare against.
       if (stage?.produces.includes('benchmark') && commands.benchmark) {
-        const res = await runCheck('benchmark', commands.benchmark, wt.path);
+        const res = await runCheck('benchmark', commands.benchmark, wt.path, undefined, sandbox);
         const value = parseBenchmark(res.output);
         if (value !== null) {
           const file = benchmarkBaselinePath(repoPath, ticketId);
@@ -583,6 +637,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
           ticketId,
           outcome.changedFiles,
           commands,
+          sandbox,
         );
         if (!res.ok) return fail(outcome, res.output);
       }

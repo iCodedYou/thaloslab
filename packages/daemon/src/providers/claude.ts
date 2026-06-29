@@ -7,7 +7,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execa } from 'execa';
 import type {
   EnforceResult,
   InvokeOptions,
@@ -20,6 +19,7 @@ import type {
 import { changedFiles } from '../util/git';
 import { lines } from '../util/stream';
 import { type CliSpec, detectCli, guardVersion } from './detect-cli';
+import { spawnSandboxed } from './sandbox/spawn';
 import { whichSync } from './which';
 
 const CLAUDE_BIN = 'claude';
@@ -134,13 +134,18 @@ export const claudeAdapter: ProviderAdapter = {
     if (opts.model) args.push('--model', opts.model);
 
     yield { type: 'status', status: 'invoking claude' };
-    const child = execa(resolved, args, {
-      cwd: opts.cwd,
-      timeout: opts.timeoutMs ?? 300_000,
-      reject: false,
-      buffer: false,
-      stripFinalNewline: false,
-    });
+    const child = spawnSandboxed(
+      resolved,
+      args,
+      {
+        cwd: opts.cwd,
+        timeout: opts.timeoutMs ?? 300_000,
+        reject: false,
+        buffer: false,
+        stripFinalNewline: false,
+      },
+      opts.sandbox,
+    );
 
     let resultText = '';
     let isError = false;

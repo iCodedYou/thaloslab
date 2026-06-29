@@ -4,8 +4,8 @@
 // baseline (the fix gate asserts the targeted test passes AND nothing previously-green regressed).
 import fs from 'node:fs';
 import path from 'node:path';
-import { execa } from 'execa';
-import type { GateCheck } from '@thaloslab/shared';
+import type { GateCheck, SandboxBinding } from '@thaloslab/shared';
+import { spawnSandboxed } from '../providers/sandbox/spawn';
 
 export interface GateCommand {
   command: string;
@@ -45,13 +45,16 @@ export async function runCheck(
   cmd: GateCommand,
   cwd: string,
   timeoutMs = 120_000,
+  sandbox?: SandboxBinding,
 ): Promise<GateRunResult> {
-  const res = await execa(cmd.command, cmd.args, {
-    cwd,
-    timeout: timeoutMs,
-    reject: false,
-    all: true,
-  });
+  // Gates run ARBITRARY project code (`pnpm test` = the repo's test files), so they must be sandboxed
+  // under the SAME scope as the agent that produced the work — else they are the jail's escape hatch.
+  const res = await spawnSandboxed(
+    cmd.command,
+    cmd.args,
+    { cwd, timeout: timeoutMs, reject: false, all: true },
+    sandbox,
+  );
   return { check, ok: res.exitCode === 0, exitCode: res.exitCode ?? -1, output: res.all ?? '' };
 }
 
@@ -75,13 +78,14 @@ export async function runSuite(
   cwd: string,
   parse: SuiteParser,
   timeoutMs = 120_000,
+  sandbox?: SandboxBinding,
 ): Promise<SuiteResult> {
-  const res = await execa(cmd.command, cmd.args, {
-    cwd,
-    timeout: timeoutMs,
-    reject: false,
-    all: true,
-  });
+  const res = await spawnSandboxed(
+    cmd.command,
+    cmd.args,
+    { cwd, timeout: timeoutMs, reject: false, all: true },
+    sandbox,
+  );
   const output = res.all ?? '';
   return { ok: res.exitCode === 0, cases: parse(output), output };
 }

@@ -37,6 +37,63 @@ export interface InvokeOptions {
   model?: string; // specific model within the provider, if applicable
   timeoutMs?: number;
   mode: ExecutionMode;
+  /** The OS sandbox that WILL wrap this invocation (Phase 5). Derived by the engine, forwarded by the
+   *  adapter into the shared spawn chokepoint. Undefined ⇒ no sandbox available/required (local DiD). */
+  sandbox?: SandboxBinding;
+}
+
+// ---- OS sandbox (Phase 5, the deferred least-privilege backstop). The 4th, OUTERMOST layer of the
+// defense-in-depth in SPEC §9 — it composes with (does not replace) the path-audit / provider flags /
+// denylist. It is the only layer that makes pathScope + network:none REAL (OS-enforced), not advisory.
+
+/** What a sandbox can actually enforce. Empty ⇒ "cannot enforce" (noop / failed self-test). */
+export type SandboxCapability =
+  | 'fs-scope' // bind a rw set + hide/ro the rest
+  | 'network-none' // deny all outbound (per-domain allowlist is NOT jail-enforceable)
+  | 'no-new-privs' // block setuid/escalation
+  | 'pid-limit'
+  | 'mem-limit'
+  | 'cpu-limit';
+
+/** The confinement a single invocation needs, derived from its ToolPolicy + cwd. */
+export interface SandboxScope {
+  fsScope: { rw: string[]; ro?: string[]; hideRest: boolean };
+  network: 'none' | 'inherit'; // 'allowlist' is intentionally absent — a jail can't do per-domain
+  limits?: { pids?: number; memMb?: number; cpuSeconds?: number; wallSeconds?: number };
+}
+
+/**
+ * Proof that a sandbox actually confines. `ok` is true ONLY when a probe that SHOULD have been denied
+ * was denied — i.e. an escape was attempted and BLOCKED. "The binary exists" is NOT verification.
+ */
+export interface SelfTestResult {
+  ok: boolean; // ok ⇔ fsBlocked && netBlocked
+  fsBlocked: boolean; // a write OUTSIDE the rw set was actually denied
+  netBlocked: boolean; // an outbound socket under network:none was actually denied
+  proof: string; // captured evidence (errno + probe transcript)
+  id: string;
+  version?: string;
+  os: string;
+  verifiedAt: number;
+}
+
+export interface Sandbox {
+  id: 'bubblewrap' | 'nsjail' | 'sandbox-exec' | 'wsl2' | 'docker' | 'noop';
+  detect(): Promise<{ available: boolean; version?: string }>;
+  capabilities(): SandboxCapability[]; // [] for noop OR a failed self-test
+  /** Attempt a REAL escape under a denying scope; ok only if it was blocked. Cached by (id,version,os). */
+  selfTest(): Promise<SelfTestResult>;
+  /** Wrap the command in the jail for the given scope. Identity for noop. */
+  wrap(cmd: string, args: string[], scope: SandboxScope): { cmd: string; args: string[] };
+}
+
+/** Threaded onto InvokeOptions: the jail handle + the scope + whether the router REQUIRES it for this
+ *  run. `requiredByRouter && !verified` ⇒ the spawn chokepoint MUST refuse (fail-closed). */
+export interface SandboxBinding {
+  handle: Sandbox;
+  scope: SandboxScope;
+  verified: boolean; // the handle's self-test passed for this environment
+  requiredByRouter: boolean; // a relaxation was granted / collab ⇒ this run MUST be wrapped
 }
 
 export interface InvokeUsage {

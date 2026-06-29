@@ -3,10 +3,31 @@
 // router. Selection is CONSTRAINT-AWARE and FAIL-CLOSED: a provider that cannot enforce the role's
 // required least-privilege policy is ineligible (never "run it anyway"); if nothing eligible
 // remains, the caller PARKS/escalates — containment is never silently reduced.
-import type { DetectedProvider, ProviderId, ToolPolicy } from '@thaloslab/shared';
+import type {
+  DetectedProvider,
+  ProviderId,
+  SandboxCapability,
+  ToolPolicy,
+} from '@thaloslab/shared';
 
 /** Per-role differ-rule: reviewer MUST differ from the engineer's provider; auditor PREFERs to. */
 export type Differ = 'must' | 'prefer' | 'none';
+
+/**
+ * Constraints a VERIFIED sandbox makes moot for THIS invocation (Phase 5). The per-command allowlist's
+ * PURPOSE is blast-radius containment; a verified fs-scope (+ network-none when the policy wants none)
+ * jail delivers that radius at the OS level → the per-command rule is moot. This is NOT "the CLI now
+ * expresses the allowlist" — it's "a stronger layer enforces what the allowlist was protecting".
+ *
+ * Hard asymmetry: a jail CANNOT do per-domain filtering, so `network-allowlist` is NEVER returned here.
+ * Only `network:'none'` is jail-enforceable; a `network:'allowlist'` policy keeps that unmet, sandboxed
+ * or not. Caps MUST already be filtered to a passed self-test (an unverified jail satisfies nothing).
+ */
+export function sandboxSatisfies(policy: ToolPolicy, caps: SandboxCapability[]): string[] {
+  const fsConfined = caps.includes('fs-scope') && policy.pathScope !== 'machine';
+  const networkHandled = policy.network !== 'none' || caps.includes('network-none');
+  return fsConfined && networkHandled ? ['command-allowlist'] : [];
+}
 
 export type Resolution =
   | { kind: 'ok'; provider: ProviderId; degraded?: 'same-provider-fresh-context' }

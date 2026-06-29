@@ -18,10 +18,10 @@ import {
   type ProviderEvent,
   type ToolPolicy,
 } from '@thaloslab/shared';
-import { execa } from 'execa';
 import { changedFiles } from '../util/git';
 import { lines } from '../util/stream';
 import { type CliSpec, detectCli, guardVersion } from './detect-cli';
+import { spawnSandboxed } from './sandbox/spawn';
 import { whichSync } from './which';
 
 const GEMINI_BIN = 'gemini';
@@ -134,13 +134,18 @@ export const geminiAdapter: ProviderAdapter = {
     const args = [...enforceGemini(opts.policy).args, '--prompt', opts.prompt];
 
     yield { type: 'status', status: 'invoking gemini' };
-    const child = execa(resolved, args, {
-      cwd: opts.cwd,
-      timeout: opts.timeoutMs ?? 300_000,
-      reject: false,
-      buffer: false,
-      stripFinalNewline: false,
-    });
+    const child = spawnSandboxed(
+      resolved,
+      args,
+      {
+        cwd: opts.cwd,
+        timeout: opts.timeoutMs ?? 300_000,
+        reject: false,
+        buffer: false,
+        stripFinalNewline: false,
+      },
+      opts.sandbox,
+    );
 
     let out = '';
     let isError = false;
