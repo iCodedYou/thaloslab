@@ -246,8 +246,11 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
     const { ticketId, task } = ctx;
     const mode: ExecutionMode = ticket?.mode ?? 'mock';
     const blastRadius = ticket?.blastRadius ?? [];
-    const commands = detectGateCommands(repoPath);
     const integDir = await ensureIntegrationWorktree(repoPath);
+    // Gate commands come from the integration worktree (where the checks actually run), NOT the main
+    // repo: in greenfield the toolchain (package.json) lives on thalos/integration before it ever
+    // reaches main, and even in maintenance the merged tree may differ from the default branch.
+    const commands = detectGateCommands(integDir);
 
     const baseline = commands.unit
       ? await runSuite(commands.unit, integDir, defaultSuiteParser)
@@ -415,7 +418,11 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       if (task.worktreePath !== wt.path) {
         updateTask(task.id, { worktreePath: wt.path, branch: wt.branch });
       }
-      const commands = detectGateCommands(repoPath);
+      // Detect gate commands from the lane worktree (where the checks run), NOT the main repo: a
+      // greenfield lane carries the scaffold's package.json that main does not yet have, and a
+      // maintenance lane may itself modify the gate scripts. Reading repoPath would silently no-op
+      // gates whenever the worktree's toolchain differs from the default branch's.
+      const commands = detectGateCommands(wt.path);
       const unitCmd = commands.unit;
 
       // Capture the suite baseline BEFORE the repro stage's agent runs, so we can identify the
