@@ -31,7 +31,10 @@ export function assemble(
   template: WorkflowTemplate,
 ): Assembly {
   const roles = new Set<AgentRole>(['orchestrator']);
-  for (const s of template.stages) if (s.role !== 'custom') roles.add(s.role);
+  for (const s of template.stages) {
+    if (s.role !== 'custom') roles.add(s.role);
+    if (s.fanOut) roles.add(s.fanOut.childRole); // engineers exist only as fan-out children
+  }
 
   const sensitive = triage.blastRadius.length > 0;
   if (sensitive) roles.add('security-auditor');

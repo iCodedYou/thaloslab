@@ -74,7 +74,7 @@ export const ROLE_DEFAULTS: Record<AgentRole, RoleDefault> = {
 };
 
 const TOOLS_BY_ROLE: Partial<Record<AgentRole, string[]>> = {
-  architect: ['Read'],
+  architect: ['Read', 'Write'], // writes the decomposition artifact (a plan, not code)
   orchestrator: ['Read'],
   reviewer: ['Read'],
   'security-auditor': ['Read'],

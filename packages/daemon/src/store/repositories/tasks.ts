@@ -3,7 +3,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { Task, TaskKind, TaskState } from '@thaloslab/shared';
 import { getDb } from '../db';
-import { tasks } from '../schema';
+import { runs, taskEvents, tasks } from '../schema';
 
 type Row = typeof tasks.$inferSelect;
 
@@ -92,6 +92,20 @@ export function updateTask(id: string, patch: TaskPatch): void {
     .set({ ...patch, updatedAt: Date.now() })
     .where(eq(tasks.id, id))
     .run();
+}
+
+/**
+ * Remove a task and its dependent rows (task_events, runs) — used to tear down fan-out children
+ * before a re-expansion. Cascading + transactional so a child that already emitted state events
+ * can be cleanly removed without orphaning FK references.
+ */
+export function deleteTask(id: string): void {
+  const db = getDb();
+  db.transaction(() => {
+    db.delete(taskEvents).where(eq(taskEvents.taskId, id)).run();
+    db.delete(runs).where(eq(runs.taskId, id)).run();
+    db.delete(tasks).where(eq(tasks.id, id)).run();
+  });
 }
 
 /**

@@ -31,6 +31,7 @@ import {
   runCheck,
   runSuite,
 } from './gates';
+import { outOfSeam, parseDecomposition, writeDecomposition } from './decomposition';
 import { agentFromRole, allowedToolsFor, clampSynthesized } from './roster/role-defaults';
 import { executeRun } from './runner';
 import { errorSignature } from './stuck';
@@ -159,6 +160,41 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
           scopeViolation: true,
           output: `path-scope violation: ${audit.offending.join(', ')}`,
         };
+      }
+
+      // Path OWNERSHIP audit: a fan-out child may only touch its declared seam (clean seams,
+      // checked not hoped). A write outside the seam is a scope breach → escalate.
+      if (task.seamPaths?.length) {
+        const offending = outOfSeam(outcome.changedFiles, task.seamPaths);
+        if (offending.length > 0) {
+          return {
+            ok: false,
+            changedFiles: outcome.changedFiles,
+            scopeViolation: true,
+            output: `seam violation: wrote outside lane (${offending.join(', ')})`,
+          };
+        }
+      }
+
+      // Fan-out PARENT (architect): persist the decomposition it produced (a `decomposition.json`
+      // in its worktree) to the canonical artifact path the engine expands from. Untrusted —
+      // expandFanOuts re-validates + disjointness-checks before materializing any lane.
+      if (stage?.fanOut) {
+        let raw = '';
+        try {
+          raw = fs.readFileSync(path.join(wt.path, 'decomposition.json'), 'utf8');
+        } catch {
+          /* fall through to the parse failure below */
+        }
+        const items =
+          parseDecomposition(raw) ?? (outcome.output ? parseDecomposition(outcome.output) : null);
+        if (!items) {
+          return fail(outcome, 'architect did not produce a valid decomposition.json');
+        }
+        writeDecomposition(repoPath, ticketId, items);
+        return outcome.ok
+          ? { ok: true, changedFiles: outcome.changedFiles }
+          : fail(outcome, outcome.output);
       }
 
       // Reviewer: the invocation's success encodes APPROVE; failure encodes REJECT (whole-loop bounce).
