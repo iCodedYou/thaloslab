@@ -56,6 +56,9 @@ export const mockAdapter: ProviderAdapter = {
     streaming: true,
     structuredOutput: true,
   }),
+  // The mock can express any policy (it's not a real CLI) → nothing unmet. The mirroring
+  // mock-codex/mock-gemini adapters (3c) override this to simulate real provider limits.
+  enforce: () => ({ args: [], unmet: [] }),
   async *invoke(opts: InvokeOptions): AsyncIterable<ProviderEvent> {
     const behavior = program(opts, callIndex++);
     yield { type: 'status', status: 'started' };

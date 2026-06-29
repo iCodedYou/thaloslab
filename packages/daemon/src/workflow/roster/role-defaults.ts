@@ -2,7 +2,13 @@
 // the StageRunner previously hardcoded. The provider invoke options (allowedTools/network/prompt)
 // are DERIVED from the resolved AgentConfig here, so privilege lives in one place. Synthesized
 // (orchestrator-created) agents are clamped to least-privilege (DECISIONS #5).
-import type { AccessLevel, AgentConfig, AgentRole, AuthorityLevel } from '@thaloslab/shared';
+import type {
+  AccessLevel,
+  AgentConfig,
+  AgentRole,
+  AuthorityLevel,
+  ToolPolicy,
+} from '@thaloslab/shared';
 
 export interface RoleDefault {
   authority: AuthorityLevel;
@@ -73,41 +79,58 @@ export const ROLE_DEFAULTS: Record<AgentRole, RoleDefault> = {
   },
 };
 
-const TOOLS_BY_ROLE: Partial<Record<AgentRole, string[]>> = {
-  architect: ['Read', 'Write'], // writes the decomposition artifact (a plan, not code)
-  orchestrator: ['Read'],
-  reviewer: ['Read'],
-  'security-auditor': ['Read'],
-  'test-author': ['Read', 'Write', 'Edit'],
-  engineer: ['Read', 'Write', 'Edit', 'Bash(git *)', 'Bash(pnpm *)', 'Bash(npm *)', 'Bash(node *)'],
-  integrator: [
-    'Read',
-    'Write',
-    'Edit',
-    'Bash(git *)',
-    'Bash(pnpm *)',
-    'Bash(npm *)',
-    'Bash(node *)',
-  ],
-};
+/** Neutral command denylist (patterns), applied to every role on top of the allowlist. */
+const DENY_COMMANDS = ['rm -rf *', 'curl *', 'wget *'];
+/** Build-gate commands a builder may run. */
+const BUILD_COMMANDS = ['git *', 'pnpm *', 'npm *', 'node *'];
 
-/** Derive the provider allowedTools for an agent (role-specific, else by authority — least privilege). */
-export function allowedToolsFor(agent: AgentConfig): string[] {
-  const byRole = TOOLS_BY_ROLE[agent.role];
-  if (byRole) return byRole;
-  switch (agent.authority) {
-    case 'L0-observe':
-      return ['Read'];
-    case 'L1-propose':
-      return ['Read', 'Write', 'Edit'];
+/**
+ * Derive the NEUTRAL ToolPolicy for an agent (SPEC §5). Role-specific where known, else by authority
+ * (least privilege). Each provider's `enforce` translates this to its own permission mechanism; a
+ * constraint a provider can't express becomes `unmet` and the router fails closed.
+ */
+export function policyFor(agent: AgentConfig): ToolPolicy {
+  const base = (over: Partial<ToolPolicy>): ToolPolicy => ({
+    canRead: true,
+    canWrite: false,
+    canExecCommands: false,
+    commandDenylist: DENY_COMMANDS,
+    network: agent.access.network,
+    networkAllowlist: agent.access.networkAllowlist,
+    pathScope: agent.access.pathScope,
+    ...over,
+  });
+  switch (agent.role) {
+    case 'engineer':
+    case 'integrator':
+      return base({ canWrite: true, canExecCommands: true, commandAllowlist: BUILD_COMMANDS });
+    case 'test-author':
+    case 'architect':
+      return base({ canWrite: true }); // writes tests / the decomposition artifact, no exec
+    case 'reviewer':
+    case 'security-auditor':
+    case 'orchestrator':
+      return base({}); // read-only
     default:
-      return ['Read', 'Write', 'Edit', 'Bash(git *)', 'Bash(node *)'];
+      // custom/synthesized: by authority.
+      if (agent.authority === 'L0-observe') return base({});
+      if (agent.authority === 'L1-propose') return base({ canWrite: true });
+      return base({ canWrite: true, canExecCommands: true, commandAllowlist: BUILD_COMMANDS });
   }
 }
 
-/** A constrained allowlist for the conflict-resolver pass: edit conflicted files + run gates only. */
-export function mergeResolveTools(): string[] {
-  return ['Read', 'Edit', 'Bash(git add *)', 'Bash(pnpm *)', 'Bash(npm *)', 'Bash(node *)'];
+/** A constrained MERGE-SCOPED policy for the conflict resolver: edit conflicted files + run gates,
+ *  no network — never rewrite logic to force a green build. */
+export function mergeResolvePolicy(agent: AgentConfig): ToolPolicy {
+  return {
+    canRead: true,
+    canWrite: true,
+    canExecCommands: true,
+    commandAllowlist: ['git add *', 'pnpm *', 'npm *', 'node *'],
+    commandDenylist: DENY_COMMANDS,
+    network: 'none',
+    pathScope: agent.access.pathScope,
+  };
 }
 
 /** Clamp a synthesized (orchestrator-created) agent to least-privilege (DECISIONS #5). */

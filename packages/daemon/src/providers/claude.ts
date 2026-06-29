@@ -1,25 +1,28 @@
-// Claude Code adapter. detect()/capabilities() are zero-cost (SPEC §5, DECISIONS #17). invoke()
-// drives `claude` headlessly: `-p --output-format stream-json` with role/permission/tool flags,
-// parsing the line-delimited JSON into ProviderEvents. changedFiles come from `git diff` in the
-// worktree (we don't trust the model's self-report). A timeout backstops any hang, and a version
-// guard warns loudly when the installed CLI is outside the tested range.
+// Claude Code adapter. detect()/capabilities()/enforce() are zero-cost (SPEC §5, DECISIONS #17).
+// enforce() translates the neutral ToolPolicy into Claude's per-tool allowlist/denylist — Claude is
+// the capability baseline (it can express read/write/exec/per-command-allowlist/denylist/network-via-
+// tool-deny), so its `unmet` is always empty. invoke() drives `claude -p --output-format stream-json`,
+// parsing line-delimited JSON into ProviderEvents; changedFiles come from `git diff` (shared util, we
+// don't trust self-reports). A version guard warns when the CLI is outside the tested range.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execa } from 'execa';
 import type {
-  DetectResult,
+  EnforceResult,
   InvokeOptions,
   InvokeResult,
   ProviderAdapter,
   ProviderCapabilities,
   ProviderEvent,
+  ToolPolicy,
 } from '@thaloslab/shared';
 import { changedFiles } from '../util/git';
+import { lines } from '../util/stream';
+import { type CliSpec, detectCli, guardVersion } from './detect-cli';
 import { whichSync } from './which';
 
 const CLAUDE_BIN = 'claude';
-/** CLI version range this adapter was written and tested against (SPEC §5 — verify at build time). */
 const TESTED_VERSION_PREFIX = '2.1.';
 
 function checkClaudeAuth(): boolean {
@@ -38,26 +41,34 @@ function checkClaudeAuth(): boolean {
   return false;
 }
 
-let versionChecked = false;
-async function guardVersion(bin: string): Promise<void> {
-  if (versionChecked) return;
-  versionChecked = true;
-  try {
-    const { stdout } = await execa(bin, ['--version'], { timeout: 10_000 });
-    const version = stdout.trim().split(/\s+/)[0] ?? '';
-    if (!version.startsWith(TESTED_VERSION_PREFIX)) {
-      // Loud warning (configurable-fail): the stream-json line protocol can drift across versions.
-      process.stderr.write(
-        `[thalos] WARNING: claude CLI ${version} is outside the tested range ${TESTED_VERSION_PREFIX}x — ` +
-          `stream-json parsing may drift. Set THALOS_STRICT_CLI_VERSION=1 to fail instead.\n`,
-      );
-      if (process.env.THALOS_STRICT_CLI_VERSION === '1') {
-        throw new Error(`claude CLI ${version} outside tested range ${TESTED_VERSION_PREFIX}x`);
-      }
+const CLAUDE_SPEC: CliSpec = {
+  bin: CLAUDE_BIN,
+  versionArgs: ['--version'],
+  authCheck: checkClaudeAuth,
+  testedPrefix: TESTED_VERSION_PREFIX,
+  label: 'claude',
+};
+
+/** Translate the neutral policy to Claude's `--allowedTools` / `--disallowedTools`. */
+function enforce(policy: ToolPolicy): EnforceResult {
+  const allowed: string[] = [];
+  if (policy.canRead) allowed.push('Read');
+  if (policy.canWrite) allowed.push('Write', 'Edit');
+  if (policy.canExecCommands) {
+    if (policy.commandAllowlist?.length) {
+      for (const p of policy.commandAllowlist) allowed.push(`Bash(${p})`);
+    } else {
+      allowed.push('Bash');
     }
-  } catch (err) {
-    if (process.env.THALOS_STRICT_CLI_VERSION === '1') throw err;
   }
+  const denied = (policy.commandDenylist ?? []).map((d) => `Bash(${d})`);
+  if (policy.network === 'none') denied.push('WebFetch', 'WebSearch');
+
+  const args: string[] = [];
+  if (allowed.length) args.push('--allowedTools', allowed.join(' '));
+  if (denied.length) args.push('--disallowedTools', denied.join(' '));
+  // Claude can express every constraint in ToolPolicy → nothing unmet.
+  return { args, unmet: [] };
 }
 
 interface ContentBlock {
@@ -80,22 +91,13 @@ export const claudeAdapter: ProviderAdapter = {
   id: 'claude',
   displayName: 'Claude Code',
 
-  async detect(): Promise<DetectResult> {
-    const resolved = whichSync(CLAUDE_BIN);
-    if (!resolved) return { installed: false, authenticated: false };
-    let version: string | undefined;
-    try {
-      const { stdout } = await execa(resolved, ['--version'], { timeout: 10_000 });
-      version = stdout.trim().split('\n')[0]?.trim();
-    } catch {
-      /* installed but version probe failed */
-    }
-    return { installed: true, authenticated: checkClaudeAuth(), version };
-  },
+  detect: () => detectCli(CLAUDE_SPEC),
 
   capabilities(): ProviderCapabilities {
     return { canEditFiles: true, canRunCommands: true, streaming: true, structuredOutput: true };
   },
+
+  enforce,
 
   async *invoke(opts: InvokeOptions): AsyncIterable<ProviderEvent> {
     const resolved = whichSync(CLAUDE_BIN);
@@ -112,7 +114,7 @@ export const claudeAdapter: ProviderAdapter = {
       };
       return;
     }
-    await guardVersion(resolved);
+    await guardVersion(resolved, TESTED_VERSION_PREFIX, 'claude');
 
     const args = [
       '-p',
@@ -126,10 +128,9 @@ export const claudeAdapter: ProviderAdapter = {
       '--no-session-persistence',
       '--max-turns',
       '30',
+      ...enforce(opts.policy).args,
     ];
     if (opts.systemPrompt) args.push('--append-system-prompt', opts.systemPrompt);
-    if (opts.allowedTools?.length) args.push('--allowedTools', opts.allowedTools.join(' '));
-    if (opts.deniedCommands?.length) args.push('--disallowedTools', opts.deniedCommands.join(' '));
     if (opts.model) args.push('--model', opts.model);
 
     yield { type: 'status', status: 'invoking claude' };
@@ -146,7 +147,6 @@ export const claudeAdapter: ProviderAdapter = {
     let inputTokens: number | undefined;
     let outputTokens: number | undefined;
     let costUsd: number | undefined;
-    let buf = '';
 
     const handleLine = (line: string): ProviderEvent[] => {
       const trimmed = line.trim();
@@ -164,9 +164,8 @@ export const claudeAdapter: ProviderAdapter = {
         for (const block of obj.message.content) {
           if (block.type === 'text' && block.text)
             events.push({ type: 'stdout', chunk: block.text });
-          if (block.type === 'tool_use' && block.name) {
+          if (block.type === 'tool_use' && block.name)
             events.push({ type: 'tool', name: block.name });
-          }
         }
       } else if (obj.type === 'result') {
         isError = obj.is_error ?? obj.subtype !== 'success';
@@ -179,17 +178,10 @@ export const claudeAdapter: ProviderAdapter = {
     };
 
     if (child.stdout) {
-      for await (const chunk of child.stdout) {
-        buf += (chunk as Buffer).toString();
-        let nl: number;
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl);
-          buf = buf.slice(nl + 1);
-          for (const e of handleLine(line)) yield e;
-        }
+      for await (const line of lines(child.stdout)) {
+        for (const e of handleLine(line)) yield e;
       }
     }
-    for (const e of handleLine(buf)) yield e;
 
     const final = await child;
     const files = await changedFiles(opts.cwd);

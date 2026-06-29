@@ -42,9 +42,9 @@ import {
 } from './specialist-gates';
 import {
   agentFromRole,
-  allowedToolsFor,
   clampSynthesized,
-  mergeResolveTools,
+  mergeResolvePolicy,
+  policyFor,
 } from './roster/role-defaults';
 import { executeRun } from './runner';
 import { errorSignature } from './stuck';
@@ -279,9 +279,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
           prompt: `Resolve ONLY the merge conflict markers in: ${conflicts.join(', ')}. Do not rewrite logic to force a green build.`,
           systemPrompt: agent.systemPrompt,
           cwd: integDir,
-          allowedTools: mergeResolveTools(),
-          deniedCommands: agent.restrictedCommands,
-          network: 'none',
+          policy: mergeResolvePolicy(agent),
           timeoutMs: 5 * 60_000,
           mode,
         };
@@ -383,9 +381,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         prompt: `Ticket: ${ticket?.title ?? ''}\nStage: ${task.stageId} (role: ${agent.role}).${seamNote}${fanOutNote}\n${ticket?.body ?? ''}`,
         systemPrompt: agent.systemPrompt,
         cwd: wt.path,
-        allowedTools: allowedToolsFor(agent),
-        deniedCommands: agent.restrictedCommands,
-        network: agent.access.network,
+        policy: policyFor(agent),
         timeoutMs: 5 * 60_000,
         mode,
       };

@@ -6,7 +6,18 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mockAdapter, resetMock, setMockProgram } from './mock';
 
 function opts(cwd: string): InvokeOptions {
-  return { prompt: 'do the thing', cwd, mode: 'mock' };
+  return {
+    prompt: 'do the thing',
+    cwd,
+    mode: 'mock',
+    policy: {
+      canRead: true,
+      canWrite: true,
+      canExecCommands: false,
+      network: 'none',
+      pathScope: 'own-worktree',
+    },
+  };
 }
 
 async function collect(cwd: string): Promise<ProviderEvent[]> {

@@ -2,7 +2,7 @@
 // the security auditor + mandatory security/deploy gates; synthesized agents are clamped.
 import type { AgentConfig } from '@thaloslab/shared';
 import { describe, expect, it } from 'vitest';
-import { allowedToolsFor, clampSynthesized } from '../roster/role-defaults';
+import { clampSynthesized, policyFor } from '../roster/role-defaults';
 import { selectTemplate } from '../templates';
 import type { TriageResult } from '../triage';
 import { assemble } from './assembly';
@@ -94,9 +94,12 @@ describe('least-privilege clamp + tool derivation (the invoke chokepoint)', () =
     expect(clampSynthesized(core)).toEqual(core);
   });
 
-  it('derives tools by role: engineer can run git, reviewer is read-only', () => {
-    const eng = allowedToolsFor({ ...synthesized, role: 'engineer' });
-    expect(eng).toContain('Bash(git *)');
-    expect(allowedToolsFor({ ...synthesized, role: 'reviewer' })).toEqual(['Read']);
+  it('derives a neutral policy by role: engineer can exec, reviewer is read-only', () => {
+    const eng = policyFor({ ...synthesized, role: 'engineer' });
+    expect(eng.canExecCommands).toBe(true);
+    expect(eng.commandAllowlist).toContain('git *');
+
+    const rev = policyFor({ ...synthesized, role: 'reviewer' });
+    expect(rev).toMatchObject({ canRead: true, canWrite: false, canExecCommands: false });
   });
 });
