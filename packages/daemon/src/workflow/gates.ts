@@ -113,3 +113,50 @@ export function fixSatisfied(
   }
   return { ok: true };
 }
+
+/** Tests that are failing in `after` but were not failing in `before` — the reproduction the
+ *  test-author just added. The repro-red gate is satisfied iff this is non-empty. */
+export function newlyFailing(before: SuiteResult, after: SuiteResult): string[] {
+  const wasFailing = failingTests(before.cases);
+  return [...failingTests(after.cases)].filter((id) => !wasFailing.has(id));
+}
+
+/**
+ * The fix gate over MULTIPLE reproduction tests + a regression baseline. Rejects when ANY repro
+ * test is missing or failing (this catches the false-pass: deleting/skipping the failing test to
+ * turn the suite green), OR when a previously-green test regressed. Suite-level exit code alone
+ * cannot see either failure.
+ */
+export function fixSatisfiedAll(
+  baselineGreen: string[],
+  reproTestIds: string[],
+  current: SuiteResult,
+): { ok: boolean; reason?: string } {
+  const status = new Map(current.cases.map((c) => [c.id, c.passed]));
+  for (const id of reproTestIds) {
+    if (status.get(id) !== true) {
+      return { ok: false, reason: `reproduction test "${id}" is missing or not passing` };
+    }
+  }
+  const nowFailing = failingTests(current.cases);
+  const regressed = baselineGreen.filter((id) => nowFailing.has(id));
+  if (regressed.length > 0) {
+    return { ok: false, reason: `regressed previously-green tests: ${regressed.join(', ')}` };
+  }
+  return { ok: true };
+}
+
+/** Default per-test parser: recognizes "PASS/FAIL <id>", TAP "ok/not ok <n> <id>", and ✓/✗ lines.
+ *  Strips any trailing ": message" so a test id is stable across pass/fail. */
+export const defaultSuiteParser: SuiteParser = (stdout) => {
+  const cases: TestCaseResult[] = [];
+  const clean = (s: string): string => s.split(':')[0]?.trim() ?? s.trim();
+  for (const raw of stdout.split('\n')) {
+    const line = raw.trim();
+    const pass = /^(?:PASS|ok(?:\s+\d+)?|✓|√)\s+(.+)$/i.exec(line);
+    const fail = /^(?:FAIL|not ok(?:\s+\d+)?|✗|✕|×)\s+(.+)$/i.exec(line);
+    if (pass?.[1]) cases.push({ id: clean(pass[1]), passed: true });
+    else if (fail?.[1]) cases.push({ id: clean(fail[1]), passed: false });
+  }
+  return cases;
+};

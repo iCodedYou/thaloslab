@@ -3,14 +3,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  defaultSuiteParser,
   detectGateCommands,
   fixSatisfied,
+  fixSatisfiedAll,
+  newlyFailing,
   reproIsRed,
   runCheck,
   runSuite,
   type SuiteParser,
   type SuiteResult,
 } from './gates';
+
+function suite(cases: { id: string; passed: boolean }[]): SuiteResult {
+  return { ok: cases.every((c) => c.passed), output: '', cases };
+}
 
 const cwd = os.tmpdir();
 
@@ -114,6 +121,80 @@ describe('fix gate: targeted test passes AND no regression', () => {
     const verdict = fixSatisfied(baseline, current, 'repro::export-500');
     expect(verdict.ok).toBe(false);
     expect(verdict.reason).toContain('keep::b');
+  });
+});
+
+describe('newlyFailing identifies the reproduction test the test-author added', () => {
+  it('returns tests that fail now but did not before', () => {
+    const before = suite([{ id: 'keep', passed: true }]);
+    const after = suite([
+      { id: 'keep', passed: true },
+      { id: 'repro::export-500', passed: false },
+    ]);
+    expect(newlyFailing(before, after)).toEqual(['repro::export-500']);
+  });
+});
+
+describe('fixSatisfiedAll: precise repro + regression assertions (catches the false-pass)', () => {
+  const baselineGreen = ['keep::a', 'keep::b'];
+  const reproTestIds = ['repro::export-500'];
+
+  it('ok when the repro test passes and previously-green stay green', () => {
+    const current = suite([
+      { id: 'repro::export-500', passed: true },
+      { id: 'keep::a', passed: true },
+      { id: 'keep::b', passed: true },
+    ]);
+    expect(fixSatisfiedAll(baselineGreen, reproTestIds, current)).toEqual({ ok: true });
+  });
+
+  it('REJECTS the false-pass: suite is green overall but the repro test was DELETED/skipped', () => {
+    // The cheat: remove the failing reproduction test so the suite goes green without a real fix.
+    const current = suite([
+      { id: 'keep::a', passed: true },
+      { id: 'keep::b', passed: true },
+    ]);
+    expect(current.ok).toBe(true); // suite-level exit code would PASS here
+    const verdict = fixSatisfiedAll(baselineGreen, reproTestIds, current);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('repro::export-500');
+  });
+
+  it('REJECTS when the repro test is still failing even though others pass', () => {
+    const current = suite([
+      { id: 'repro::export-500', passed: false },
+      { id: 'keep::a', passed: true },
+      { id: 'keep::b', passed: true },
+    ]);
+    expect(fixSatisfiedAll(baselineGreen, reproTestIds, current).ok).toBe(false);
+  });
+
+  it('REJECTS when the repro test passes but a previously-green test regressed', () => {
+    const current = suite([
+      { id: 'repro::export-500', passed: true },
+      { id: 'keep::a', passed: true },
+      { id: 'keep::b', passed: false }, // regression
+    ]);
+    const verdict = fixSatisfiedAll(baselineGreen, reproTestIds, current);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('keep::b');
+  });
+});
+
+describe('defaultSuiteParser', () => {
+  it('parses PASS/FAIL lines and strips trailing messages', () => {
+    const cases = defaultSuiteParser('PASS sum(0,0)\nFAIL sum(2,3): expected 5, got -1\n');
+    expect(cases).toEqual([
+      { id: 'sum(0,0)', passed: true },
+      { id: 'sum(2,3)', passed: false },
+    ]);
+  });
+  it('parses TAP and ✓/✗ lines', () => {
+    const cases = defaultSuiteParser('ok 1 alpha\nnot ok 2 beta\n✓ gamma\n✗ delta\n');
+    expect(cases.find((c) => c.id === 'alpha')?.passed).toBe(true);
+    expect(cases.find((c) => c.id === 'beta')?.passed).toBe(false);
+    expect(cases.find((c) => c.id === 'gamma')?.passed).toBe(true);
+    expect(cases.find((c) => c.id === 'delta')?.passed).toBe(false);
   });
 });
 
