@@ -5,7 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import type { WorkflowTemplate } from '@thaloslab/shared';
 import { simpleGit } from 'simple-git';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+// Real git worktree + agent run — raise above the 5s default for full-suite concurrency.
+vi.setConfig({ testTimeout: 30000 });
 
 const dbFile = path.join(os.tmpdir(), `thalos-seam-${process.pid}-${Date.now()}.db`);
 process.env.THALOS_DB_PATH = dbFile;

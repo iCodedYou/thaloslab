@@ -6,7 +6,11 @@ import os from 'node:os';
 import path from 'node:path';
 import type { WorkflowTemplate } from '@thaloslab/shared';
 import { simpleGit } from 'simple-git';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+// Real git worktree + several pnpm gate runs + lane commits — well past the 5s default under
+// full-suite concurrency.
+vi.setConfig({ testTimeout: 30000 });
 import type { InvokeOptions } from '@thaloslab/shared';
 
 const dbFile = path.join(os.tmpdir(), `thalos-precise-${process.pid}-${Date.now()}.db`);

@@ -51,8 +51,10 @@ import { errorSignature } from './stuck';
 import {
   type Worktree,
   abortMerge,
+  aheadOfIntegration,
   auditScope,
   commitMerge,
+  commitWorktree,
   createWorktree,
   detectConflicts,
   ensureIntegrationWorktree,
@@ -227,16 +229,20 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       ? await runSuite(commands.unit, integDir, defaultSuiteParser)
       : undefined;
 
-    // Lane branches in deterministic order (replays identically after a crash), de-duplicated.
-    const seen = new Set<string>();
+    // Merge candidates: every distinct lane branch that carries built work (is ahead of
+    // integration), in deterministic order. This covers BOTH topologies — fan-out seam lanes
+    // (feature/refactor) and the single :main lane (bug-fix/optimization) — and skips lanes that
+    // only produced planning artifacts (the architect's :main lane is not ahead).
+    const candidates = [
+      ...new Set(
+        listTasksByTicket(ticketId)
+          .map((t) => t.branch)
+          .filter((b): b is string => Boolean(b)),
+      ),
+    ].sort();
     const branches: string[] = [];
-    for (const t of listTasksByTicket(ticketId)
-      .filter((x) => x.branch && x.laneId.includes(':seam-'))
-      .sort((a, b) => a.laneId.localeCompare(b.laneId))) {
-      if (t.branch && !seen.has(t.branch)) {
-        seen.add(t.branch);
-        branches.push(t.branch);
-      }
+    for (const b of candidates) {
+      if (await aheadOfIntegration(repoPath, b)) branches.push(b);
     }
 
     for (const branch of branches) {
@@ -335,6 +341,9 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       const { task, template, ticketId } = ctx;
       const stage = template.stages.find((s) => s.id === task.stageId);
       const role: AgentRole = stage?.role ?? 'engineer';
+      // Builders mutate code; their work must be COMMITTED to the lane branch so the integrator has
+      // something to merge (worktree changes alone never reach thalos/integration).
+      const isBuilder = role === 'engineer' || role === 'test-author';
       const ticket = getTicket(ticketId);
       const mode: ExecutionMode = ticket?.mode ?? 'mock';
       const repoPath = ticket
@@ -364,9 +373,14 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       const seamNote = task.seamPaths?.length
         ? `\nYour seam (only touch these paths): ${task.seamPaths.join(', ')}`
         : '';
+      // A fan-out parent (architect) must emit the decomposition as a concrete artifact the engine
+      // can expand from — spell out the exact filename + schema so the real agent produces it.
+      const fanOutNote = stage?.fanOut
+        ? `\nWrite a file named "decomposition.json" at the repo root: a JSON array where each element is {"seamPaths": ["dir-or-file", ...], "summary": "..."}. Every lane's seamPaths MUST be DISJOINT from every other lane's (no shared files/dirs). Split only along clean, independent seams; if there is no clean split, return a single element.`
+        : '';
       const provider = adapterFor('claude', mode);
       const opts: InvokeOptions = {
-        prompt: `Ticket: ${ticket?.title ?? ''}\nStage: ${task.stageId} (role: ${agent.role}).${seamNote}\n${ticket?.body ?? ''}`,
+        prompt: `Ticket: ${ticket?.title ?? ''}\nStage: ${task.stageId} (role: ${agent.role}).${seamNote}${fanOutNote}\n${ticket?.body ?? ''}`,
         systemPrompt: agent.systemPrompt,
         cwd: wt.path,
         allowedTools: allowedToolsFor(agent),
@@ -453,6 +467,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
             reproTestIds,
           });
         }
+        if (outcome.ok) await commitWorktree(wt.path, `repro @ ${task.laneId}`);
         return outcome.ok
           ? { ok: true, changedFiles: outcome.changedFiles }
           : fail(outcome, outcome.output);
@@ -476,6 +491,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
           const res = await runCheck('unit', unitCmd, wt.path);
           if (!res.ok) return fail(outcome, res.output);
         }
+        if (outcome.ok) await commitWorktree(wt.path, `fix @ ${task.laneId}`);
         return outcome.ok
           ? { ok: true, changedFiles: outcome.changedFiles }
           : fail(outcome, outcome.output);
@@ -508,6 +524,9 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         );
         if (!res.ok) return fail(outcome, res.output);
       }
+      // Commit a builder's work (e.g. a fan-out engineer) onto its lane branch for the integrator.
+      if (isBuilder && outcome.ok)
+        await commitWorktree(wt.path, `${task.stageId} @ ${task.laneId}`);
       return outcome.ok
         ? { ok: true, changedFiles: outcome.changedFiles }
         : fail(outcome, outcome.output);

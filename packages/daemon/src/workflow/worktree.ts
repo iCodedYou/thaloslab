@@ -165,6 +165,31 @@ export async function commitMerge(integDir: string, message: string): Promise<vo
   await git.raw(['commit', '--no-edit', '-m', message]);
 }
 
+/** Commit a builder's worktree changes onto its lane branch so the integrator has work to merge.
+ *  Returns false (no commit) when the worktree is clean. */
+export async function commitWorktree(wtPath: string, message: string): Promise<boolean> {
+  const git = simpleGit(wtPath);
+  await git.add(['-A']);
+  const status = await git.status();
+  if (status.files.length === 0) return false;
+  await git.commit(message);
+  return true;
+}
+
+/** True if `branch` has commits the integration branch doesn't (i.e. it carries built work). */
+export async function aheadOfIntegration(repoPath: string, branch: string): Promise<boolean> {
+  try {
+    const out = await simpleGit(repoPath).raw([
+      'rev-list',
+      '--count',
+      `${INTEGRATION_BRANCH}..${branch}`,
+    ]);
+    return Number(out.trim()) > 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Remove a task worktree (retaining its branch + diff). Windows holds file handles (subprocess,
  * AV, watchers) so removal can EPERM/EBUSY — bounded retry, then a manual rm + prune fallback.
