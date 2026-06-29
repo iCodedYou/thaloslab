@@ -1,17 +1,92 @@
-import { useQuery } from '@tanstack/react-query';
-import type { DetectedProvider, Project } from '@thaloslab/shared';
-import { apiGet } from './client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type {
+  DetectedProvider,
+  ExecutionMode,
+  Gate,
+  GateDecision,
+  OrchestratorMessage,
+  Project,
+  Task,
+  Ticket,
+} from '@thaloslab/shared';
+import { apiGet, apiPost } from './client';
 
 export function useProjects() {
-  return useQuery({
-    queryKey: ['projects'],
-    queryFn: () => apiGet<Project[]>('/api/projects'),
-  });
+  return useQuery({ queryKey: ['projects'], queryFn: () => apiGet<Project[]>('/api/projects') });
 }
 
 export function useProviders() {
   return useQuery({
     queryKey: ['providers'],
     queryFn: () => apiGet<DetectedProvider[]>('/api/providers'),
+  });
+}
+
+export interface ArtifactRecord {
+  id: string;
+  kind: string;
+  path: string;
+  summary?: string;
+}
+export interface StoredMessage {
+  id: string;
+  message: OrchestratorMessage;
+  createdAt: number;
+}
+export interface TicketDetail {
+  ticket: Ticket;
+  tasks: Task[];
+  gates: Gate[];
+  artifacts: ArtifactRecord[];
+  messages: StoredMessage[];
+}
+
+const TERMINAL: ReadonlySet<string> = new Set([
+  'done',
+  'failed',
+  'escalated',
+  'aborted',
+  'preview-complete',
+]);
+
+export function useTickets(projectId?: string) {
+  return useQuery({
+    queryKey: ['tickets', projectId],
+    queryFn: () => apiGet<Ticket[]>(`/api/tickets${projectId ? `?projectId=${projectId}` : ''}`),
+    refetchInterval: 2000,
+  });
+}
+
+export function useTicket(id?: string) {
+  return useQuery({
+    queryKey: ['ticket', id],
+    queryFn: () => apiGet<TicketDetail>(`/api/tickets/${id}`),
+    enabled: Boolean(id),
+    // Light polling while the ticket is active (the WS hook also invalidates on events).
+    refetchInterval: (q) => (TERMINAL.has(q.state.data?.ticket.status ?? '') ? false : 1500),
+  });
+}
+
+export function useCreateTicket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { projectId: string; title: string; body?: string; mode: ExecutionMode }) =>
+      apiPost<{ ticket: Ticket }>('/api/tickets', body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['tickets'] }),
+  });
+}
+
+export function useResolveGate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { gateId: string; decision: GateDecision; comment?: string }) =>
+      apiPost(`/api/gates/${args.gateId}/resolve`, {
+        decision: args.decision,
+        comment: args.comment,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ticket'] });
+      void qc.invalidateQueries({ queryKey: ['tickets'] });
+    },
   });
 }

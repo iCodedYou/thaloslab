@@ -36,8 +36,12 @@ export async function createWorktree(repoPath: string, taskId: string): Promise<
   const wtPath = worktreeDir(repoPath, `task-${taskId}`);
   // New task branch + worktree off the integration branch (not the default branch).
   await simpleGit(repoPath).raw(['worktree', 'add', '-b', branch, wtPath, INTEGRATION_BRANCH]);
-  // Avoid CRLF-noisy diffs that would confuse the no-progress doom-loop hash.
+  // EOL hardening — fix the cause, since changedFiles feeds the no-progress heuristic:
+  //   (layer 1, source) a worktree-local .gitattributes makes git normalize line endings in diffs,
+  //   so a Windows CRLF checkout no longer shows every file as modified. Combined with
+  //   core.autocrlf=false and the --ignore-cr-at-eol diff in util/git.ts (layer 2).
   await simpleGit(wtPath).addConfig('core.autocrlf', 'false', false, 'local');
+  fs.writeFileSync(path.join(wtPath, '.gitattributes'), '* text=auto eol=lf\n', 'utf8');
   return { taskId, path: wtPath, branch };
 }
 

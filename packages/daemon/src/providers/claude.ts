@@ -15,6 +15,7 @@ import type {
   ProviderCapabilities,
   ProviderEvent,
 } from '@thaloslab/shared';
+import { changedFiles } from '../util/git';
 import { whichSync } from './which';
 
 const CLAUDE_BIN = 'claude';
@@ -73,25 +74,6 @@ interface StreamLine {
   is_error?: boolean;
   total_cost_usd?: number;
   usage?: { input_tokens?: number; output_tokens?: number };
-}
-
-async function gitChangedFiles(cwd: string): Promise<string[]> {
-  try {
-    const tracked = await execa('git', ['diff', '--name-only'], { cwd, reject: false });
-    const untracked = await execa('git', ['ls-files', '--others', '--exclude-standard'], {
-      cwd,
-      reject: false,
-    });
-    const set = new Set(
-      `${tracked.stdout}\n${untracked.stdout}`
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean),
-    );
-    return [...set];
-  } catch {
-    return [];
-  }
 }
 
 export const claudeAdapter: ProviderAdapter = {
@@ -210,13 +192,13 @@ export const claudeAdapter: ProviderAdapter = {
     for (const e of handleLine(buf)) yield e;
 
     const final = await child;
-    const changedFiles = await gitChangedFiles(opts.cwd);
+    const files = await changedFiles(opts.cwd);
     const ok = !isError && (final.exitCode ?? 0) === 0;
     const result: InvokeResult = {
       ok,
       output: resultText,
       artifacts: [],
-      changedFiles,
+      changedFiles: files,
       usage: { inputTokens, outputTokens, costUsd },
       raw: { exitCode: final.exitCode, timedOut: final.timedOut },
     };

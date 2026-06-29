@@ -2,8 +2,9 @@ import { useUiStore } from '../state/ui';
 
 const NAV = [
   { id: 'projects', label: 'Projects' },
-  { id: 'agents', label: 'Agents' },
+  { id: 'orchestrator', label: 'Orchestrator' },
   { id: 'tickets', label: 'Tickets' },
+  { id: 'agents', label: 'Agents' },
   { id: 'settings', label: 'Settings' },
 ];
 

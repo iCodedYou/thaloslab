@@ -1,12 +1,28 @@
 import { LeftRail } from './layout/LeftRail';
 import { MainPage } from './pages/Main';
+import { OrchestratorPage } from './pages/Orchestrator';
+import { TicketsPage } from './pages/Tickets';
+import { useUiStore } from './state/ui';
+
+function Placeholder({ label }: { label: string }) {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <p className="text-sm text-faint">{label} — coming in a later phase.</p>
+    </div>
+  );
+}
 
 export function App() {
+  const activeNav = useUiStore((s) => s.activeNav);
   return (
     <div className="flex h-full">
       <LeftRail />
-      <main className="flex-1 overflow-auto">
-        <MainPage />
+      <main className="min-w-0 flex-1 overflow-hidden">
+        {activeNav === 'projects' && <MainPage />}
+        {activeNav === 'orchestrator' && <OrchestratorPage />}
+        {activeNav === 'tickets' && <TicketsPage />}
+        {activeNav === 'agents' && <Placeholder label="Agents" />}
+        {activeNav === 'settings' && <Placeholder label="Settings" />}
       </main>
     </div>
   );
