@@ -48,13 +48,9 @@ describe('the self-test is the keystone (verified ⇔ an escape was PROVEN block
     ); // net escaped → not confined
   });
 
-  it('an unparseable/absent probe transcript is treated as an ESCAPE (fail-closed)', () => {
-    // If we cannot PROVE the probe was confined, we must not call it confined.
-    expect(parseProbe('garbage, no marker')).toEqual({
-      wroteOutside: true,
-      connectedOut: true,
-      raw: 'garbage, no marker',
-    });
+  it('an unparseable/absent probe transcript is treated as reachable on both axes (fail-closed)', () => {
+    // If we cannot read the probe, we don't get to call it confined.
+    expect(parseProbe('garbage, no marker')).toEqual({ selfWrote: true, connectedOut: true });
   });
 
   it('NoopSandbox is the uniform "cannot enforce": caps=[] and selfTest never ok', async () => {

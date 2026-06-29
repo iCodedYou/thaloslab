@@ -261,7 +261,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
 
     // The integration sweep also runs arbitrary project code (`pnpm test` on the merged tree), so it
     // is sandboxed under the integration worktree's scope when a verified jail is available.
-    const integHandle = detectSandbox();
+    const integHandle = await detectSandbox();
     const integSelfTest = await verifiedSelfTest(integHandle);
     const integSandbox: SandboxBinding = {
       handle: integHandle,
@@ -432,7 +432,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       // worktree-specific), so we learn them BEFORE the worktree and feed only the TRUSTED set (empty
       // unless the self-test confirmed real confinement) to the router — it may un-pin Codex/Gemini
       // ONLY because the same run will actually be wrapped (the binding below shares that fact).
-      const sandboxHandle = detectSandbox();
+      const sandboxHandle = await detectSandbox();
       const selfTest = await verifiedSelfTest(sandboxHandle);
       const sbxCaps = selfTest.ok ? sandboxHandle.capabilities() : [];
 

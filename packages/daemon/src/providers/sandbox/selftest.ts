@@ -25,16 +25,18 @@ export interface ProbeOutcome {
   raw: string;
 }
 
-// Reads THALOS_PROBE_OUTSIDE; attempts the two escapes; prints `PROBE:{json}`. Errno classification:
-// a jail blocks fs with EACCES/EROFS/EPERM/ENOENT and net with ENETUNREACH/ENETDOWN/EPERM/EACCES; a
-// non-jailed host writes successfully and gets ECONNREFUSED/ETIMEDOUT (stack reachable) on a dead port.
+// Writes THALOS_PROBE_TOKEN to THALOS_PROBE_OUTSIDE (a HOST path), then attempts an outbound socket.
+// FS verdict is by HOST-READBACK, not the probe's self-report: a container's fs is writable but
+// host-ISOLATED, so a probe that "wrote a file" did NOT necessarily reach the host — only the harness,
+// reading the host path afterwards, can tell whether the write truly escaped. NET is by probe report
+// (network isolation is real from inside the jail).
 const PROBE_SRC = `
 import fs from 'node:fs';
 import net from 'node:net';
-const out = { wroteOutside: false, connectedOut: false, fsErr: '', netErr: '' };
+const out = { selfWrote: false, connectedOut: false, fsErr: '', netErr: '' };
 const outside = process.env.THALOS_PROBE_OUTSIDE;
-try { fs.writeFileSync(outside, 'x'); out.wroteOutside = true; try { fs.unlinkSync(outside); } catch {} }
-catch (e) { out.fsErr = e && e.code ? e.code : String(e); }
+const token = process.env.THALOS_PROBE_TOKEN || 'x';
+try { fs.writeFileSync(outside, token); out.selfWrote = true; } catch (e) { out.fsErr = e && e.code ? e.code : String(e); }
 let done = false;
 const finish = () => { if (done) return; done = true; process.stdout.write('PROBE:' + JSON.stringify(out)); process.exit(0); };
 const s = net.connect({ host: '127.0.0.1', port: 1 });
@@ -43,23 +45,39 @@ s.on('error', (e) => { const c = (e && e.code) || ''; if (c === 'ECONNREFUSED' |
 setTimeout(finish, 1500);
 `;
 
-/** Run the escape probe under `handle`'s jail and report what got through. Used by every real
- *  Sandbox.selfTest(); the rw set is a throwaway dir so the "outside" target is genuinely outside. */
+interface ProbeReport {
+  selfWrote: boolean;
+  connectedOut: boolean;
+}
+
+/** Run the escape probe under `handle`'s jail. The rw set is a throwaway dir; the escape target is a
+ *  HOST path OUTSIDE it. `wroteOutside` is decided by HOST-READBACK (did the probe's token actually
+ *  land in the host file?), so a container that isolates without denying the write is correctly judged
+ *  confined. Net is by the probe's own reachability. */
 export async function runEscapeProbe(handle: Sandbox): Promise<ProbeOutcome> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thalos-sbx-'));
   const probeFile = path.join(dir, 'probe.mjs');
   fs.writeFileSync(probeFile, PROBE_SRC, 'utf8');
   const outside = path.join(os.tmpdir(), `thalos-escape-${process.pid}-${Date.now()}`);
+  const token = `ESCAPED-${process.pid}-${Date.now()}`;
   const scope: SandboxScope = { fsScope: { rw: [dir], hideRest: true }, network: 'none' };
   const wrapped = handle.wrap('node', [probeFile], scope);
   try {
     const res = await execa(wrapped.cmd, wrapped.args, {
       cwd: dir,
-      timeout: 15_000,
+      timeout: 20_000,
       reject: false,
-      env: { ...process.env, THALOS_PROBE_OUTSIDE: outside },
+      env: { ...process.env, THALOS_PROBE_OUTSIDE: outside, THALOS_PROBE_TOKEN: token },
     });
-    return parseProbe(res.stdout ?? '');
+    // AUTHORITATIVE fs verdict: did the probe's write actually reach the HOST file?
+    let hostEscaped = false;
+    try {
+      hostEscaped = fs.readFileSync(outside, 'utf8').includes(token);
+    } catch {
+      hostEscaped = false; // host file absent ⇒ the write never reached the host ⇒ confined
+    }
+    const report = parseProbe(res.stdout ?? '');
+    return { wroteOutside: hostEscaped, connectedOut: report.connectedOut, raw: res.stdout ?? '' };
   } finally {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -70,16 +88,16 @@ export async function runEscapeProbe(handle: Sandbox): Promise<ProbeOutcome> {
   }
 }
 
-/** Parse the `PROBE:{json}` line. An unparseable/absent line is treated as an ESCAPE (fail-closed):
- *  if we can't prove the probe was confined, we must not call it confined. */
-export function parseProbe(stdout: string): ProbeOutcome {
+/** Parse the `PROBE:{json}` line for the probe's self-report. An unparseable/absent line is treated as
+ *  reachable on BOTH axes (fail-closed): if we can't read the probe, we don't get to call it confined. */
+export function parseProbe(stdout: string): ProbeReport {
   const marker = stdout.lastIndexOf('PROBE:');
-  if (marker === -1) return { wroteOutside: true, connectedOut: true, raw: stdout };
+  if (marker === -1) return { selfWrote: true, connectedOut: true };
   try {
-    const obj = JSON.parse(stdout.slice(marker + 'PROBE:'.length).trim()) as ProbeOutcome;
-    return { wroteOutside: !!obj.wroteOutside, connectedOut: !!obj.connectedOut, raw: stdout };
+    const obj = JSON.parse(stdout.slice(marker + 'PROBE:'.length).trim()) as ProbeReport;
+    return { selfWrote: !!obj.selfWrote, connectedOut: !!obj.connectedOut };
   } catch {
-    return { wroteOutside: true, connectedOut: true, raw: stdout };
+    return { selfWrote: true, connectedOut: true };
   }
 }
 

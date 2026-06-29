@@ -10,6 +10,7 @@ import type {
   SelfTestResult,
   ToolPolicy,
 } from '@thaloslab/shared';
+import { bubblewrapSandbox } from './bubblewrap';
 import { noopSandbox } from './noop';
 
 let override: Sandbox | null = null;
@@ -24,10 +25,23 @@ export function resetSandbox(): void {
   cache.clear();
 }
 
-/** The platform sandbox. 5a: NoopSandbox everywhere (real jails are 5b). */
-export function detectSandbox(): Sandbox {
+/** Per-platform jail CANDIDATES, best first. Availability (binary present) is checked here; real
+ *  CONFINEMENT is checked later by the self-test — a present-but-misconfigured jail is detected here
+ *  but never TRUSTED until its self-test passes. macOS (sandbox-exec/Lima) and Windows (WSL2/Docker)
+ *  backends are DEFERRED — on a box without them, candidates() is empty and we fall back to Noop. */
+function candidates(): Sandbox[] {
+  if (process.platform === 'linux') return [bubblewrapSandbox];
+  return []; // macOS/Windows real backends: DEFERRED-PENDING-MACOS / DEFERRED-PENDING-WSL-OR-DOCKER
+}
+
+/** The platform sandbox: the first AVAILABLE candidate, else NoopSandbox. "Available" = the binary is
+ *  present; it is still not TRUSTED until verifiedSelfTest() proves it confines. */
+export async function detectSandbox(): Promise<Sandbox> {
   if (override) return override;
-  return noopSandbox; // 5b: return bubblewrap/sandbox-exec/wsl2 when detected + available
+  for (const candidate of candidates()) {
+    if ((await candidate.detect()).available) return candidate;
+  }
+  return noopSandbox;
 }
 
 const cache = new Map<string, SelfTestResult>();
@@ -69,7 +83,7 @@ export async function resolveSandboxBinding(
   cwd: string,
   opts: { required: boolean; repoRoot?: string } = { required: false },
 ): Promise<SandboxBinding> {
-  const handle = detectSandbox();
+  const handle = await detectSandbox();
   const selfTest = await verifiedSelfTest(handle);
   return {
     handle,
