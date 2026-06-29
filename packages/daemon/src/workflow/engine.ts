@@ -50,6 +50,9 @@ export interface StageOutcome {
   reviewRejected?: boolean;
   /** Post-run path-scope audit failed → immediate escalation. */
   scopeViolation?: boolean;
+  /** Terminal failure that must NOT be retried (e.g. an unresolvable merge conflict, a
+   *  blast-radius merge, or a works-alone-breaks-together regression) → immediate escalation. */
+  escalate?: boolean;
 }
 
 export interface StageRunContext {
@@ -303,6 +306,10 @@ export function createEngine(deps: EngineDeps) {
 
       if (outcome.scopeViolation) {
         escalateTask(task, 'path-scope violation: agent wrote outside its worktree');
+        return;
+      }
+      if (outcome.escalate) {
+        escalateTask(task, outcome.output ?? 'unrecoverable failure');
         return;
       }
       if (outcome.ok && !outcome.reviewRejected) {

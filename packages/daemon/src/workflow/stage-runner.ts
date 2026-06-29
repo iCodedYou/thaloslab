@@ -14,11 +14,12 @@ import type {
   ExecutionMode,
   GateCheck,
   InvokeOptions,
+  Ticket,
 } from '@thaloslab/shared';
 import { adapterFor } from '../providers/registry';
 import { getAgent } from '../store/repositories/agents';
 import { getProject } from '../store/repositories/projects';
-import { updateTask } from '../store/repositories/tasks';
+import { listTasksByTicket, updateTask } from '../store/repositories/tasks';
 import { getTicket } from '../store/repositories/tickets';
 import type { EventBus } from './events';
 import type { StageOutcome, StageRunContext, StageRunner } from './engine';
@@ -32,10 +33,24 @@ import {
   runSuite,
 } from './gates';
 import { outOfSeam, parseDecomposition, writeDecomposition } from './decomposition';
-import { agentFromRole, allowedToolsFor, clampSynthesized } from './roster/role-defaults';
+import {
+  agentFromRole,
+  allowedToolsFor,
+  clampSynthesized,
+  mergeResolveTools,
+} from './roster/role-defaults';
 import { executeRun } from './runner';
 import { errorSignature } from './stuck';
-import { type Worktree, auditScope, createWorktree } from './worktree';
+import {
+  type Worktree,
+  abortMerge,
+  auditScope,
+  commitMerge,
+  createWorktree,
+  detectConflicts,
+  ensureIntegrationWorktree,
+  mergeInto,
+} from './worktree';
 
 interface GateState {
   baselineGreen: string[];
@@ -102,6 +117,146 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
     };
   }
 
+  /** Run the deterministic gates (build/type/lint + unit) in a directory; first failure wins. */
+  async function fullGateGreen(
+    commands: ReturnType<typeof detectGateCommands>,
+    dir: string,
+  ): Promise<{ ok: boolean; output: string }> {
+    for (const check of ['build', 'typecheck', 'lint', 'unit'] as GateCheck[]) {
+      const cmd = commands[check];
+      if (!cmd) continue;
+      const res = await runCheck(check, cmd, dir);
+      if (!res.ok) return { ok: false, output: `${check}: ${res.output.slice(0, 300)}` };
+    }
+    return { ok: true, output: '' };
+  }
+
+  /**
+   * The real parallel integrator. Merges each lane branch into `thalos/integration` ONE AT A TIME
+   * (deterministic order). On a git conflict: if the change is blast-radius it escalates immediately
+   * (no agent touches sensitive merge markers); otherwise a bounded, MERGE-SCOPED resolver agent
+   * fixes the markers in the integration worktree and the FULL gate must pass before the merge is
+   * accepted — a resolution that breaks behavior is rejected. After all lanes merge, the full suite
+   * runs once more vs the pre-integration baseline (the works-alone-breaks-together backstop).
+   */
+  async function runIntegration(
+    ctx: StageRunContext,
+    repoPath: string,
+    ticket: Ticket | null,
+  ): Promise<StageOutcome> {
+    const { ticketId, task } = ctx;
+    const mode: ExecutionMode = ticket?.mode ?? 'mock';
+    const blastRadius = ticket?.blastRadius ?? [];
+    const commands = detectGateCommands(repoPath);
+    const integDir = await ensureIntegrationWorktree(repoPath);
+
+    const baseline = commands.unit
+      ? await runSuite(commands.unit, integDir, defaultSuiteParser)
+      : undefined;
+
+    // Lane branches in deterministic order (replays identically after a crash), de-duplicated.
+    const seen = new Set<string>();
+    const branches: string[] = [];
+    for (const t of listTasksByTicket(ticketId)
+      .filter((x) => x.branch && x.laneId.includes(':seam-'))
+      .sort((a, b) => a.laneId.localeCompare(b.laneId))) {
+      if (t.branch && !seen.has(t.branch)) {
+        seen.add(t.branch);
+        branches.push(t.branch);
+      }
+    }
+
+    for (const branch of branches) {
+      const merged = await mergeInto(integDir, branch);
+      if (merged.ok) continue;
+
+      const conflicts = await detectConflicts(integDir);
+      if (blastRadius.length > 0) {
+        await abortMerge(integDir);
+        return {
+          ok: false,
+          escalate: true,
+          changedFiles: branches,
+          output: `blast-radius conflict (${blastRadius.join(', ')}) in ${conflicts.join(', ')} — escalated, no auto-resolve`,
+        };
+      }
+
+      // True iff any conflicted file still carries git conflict markers. Checked by CONTENT, not by
+      // git's unmerged status: `git add` would clear that status even with markers still present.
+      const markersRemain = (): boolean =>
+        conflicts.some((f) => {
+          try {
+            return /^(<{7}|>{7}|={7})/m.test(fs.readFileSync(path.join(integDir, f), 'utf8'));
+          } catch {
+            return false;
+          }
+        });
+
+      // Bounded merge-scoped resolve; the FULL gate must pass before we accept the merge.
+      let resolved = false;
+      for (let attempt = 0; attempt < 2 && !resolved; attempt++) {
+        const agent = resolveAgent(undefined, 'integrator');
+        const opts: InvokeOptions = {
+          prompt: `Resolve ONLY the merge conflict markers in: ${conflicts.join(', ')}. Do not rewrite logic to force a green build.`,
+          systemPrompt: agent.systemPrompt,
+          cwd: integDir,
+          allowedTools: mergeResolveTools(),
+          deniedCommands: agent.restrictedCommands,
+          network: 'none',
+          timeoutMs: 5 * 60_000,
+          mode,
+        };
+        await executeRun(adapterFor('claude', mode), opts, {
+          ticketId,
+          taskId: task.id,
+          agentId: undefined,
+          bus: deps.bus,
+          now,
+        });
+        if (markersRemain()) continue; // resolver left markers → retry
+        // Gate the resolved working tree; accept (commit) the merge ONLY if the full gate is green.
+        const gate = await fullGateGreen(commands, integDir);
+        if (gate.ok) {
+          await commitMerge(integDir, `integrate ${branch} (conflict resolved)`);
+          resolved = true;
+        }
+      }
+      if (!resolved) {
+        await abortMerge(integDir);
+        return {
+          ok: false,
+          escalate: true,
+          changedFiles: branches,
+          output: `unresolved merge conflict in ${conflicts.join(', ')}`,
+        };
+      }
+    }
+
+    // Works-alone-breaks-together: the combined tree must build AND not regress the baseline.
+    const finalGate = await fullGateGreen(commands, integDir);
+    if (!finalGate.ok) {
+      return {
+        ok: false,
+        escalate: true,
+        changedFiles: branches,
+        output: `integration gate failed — ${finalGate.output}`,
+      };
+    }
+    if (commands.unit && baseline) {
+      const after = await runSuite(commands.unit, integDir, defaultSuiteParser);
+      const broke = newlyFailing(baseline, after);
+      if (broke.length > 0) {
+        return {
+          ok: false,
+          escalate: true,
+          changedFiles: branches,
+          output: `works-alone-breaks-together: combined suite regressed ${broke.join(', ')}`,
+        };
+      }
+    }
+    return { ok: true, changedFiles: branches };
+  }
+
   return {
     async run(ctx: StageRunContext): Promise<StageOutcome> {
       const { task, template, ticketId } = ctx;
@@ -112,6 +267,10 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       const repoPath = ticket
         ? (getProject(ticket.projectId)?.repoPath ?? process.cwd())
         : process.cwd();
+
+      // The integrator doesn't get a lane worktree — it merges the lane branches into
+      // thalos/integration with conflict orchestration.
+      if (role === 'integrator') return runIntegration(ctx, repoPath, ticket);
 
       const wt = await ensureWorktree(repoPath, task.laneId);
       if (task.worktreePath !== wt.path) {

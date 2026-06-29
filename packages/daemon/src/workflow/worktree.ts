@@ -102,7 +102,8 @@ export async function ensureIntegrationWorktree(repoPath: string): Promise<strin
   return wtPath;
 }
 
-/** Merge a task branch into `thalos/integration` (never the default branch). */
+/** Merge a task branch into `thalos/integration` (never the default branch). Aborts on conflict —
+ *  the simple primitive used where conflict ORCHESTRATION isn't wanted. */
 export async function integrate(
   repoPath: string,
   branch: string,
@@ -112,7 +113,6 @@ export async function integrate(
     const out = await simpleGit(wt).raw(['merge', '--no-edit', branch]);
     return { ok: true, output: out };
   } catch (err) {
-    // Conflict or merge failure — leave it for inspection; abort to keep integration clean.
     try {
       await simpleGit(wt).raw(['merge', '--abort']);
     } catch {
@@ -120,6 +120,49 @@ export async function integrate(
     }
     return { ok: false, output: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Low-level merge that LEAVES a conflict in place (no auto-abort) so the integrator can detect and
+ *  resolve it. `conflicted` is true when the merge stopped on conflicts. */
+export async function mergeInto(
+  integDir: string,
+  branch: string,
+): Promise<{ ok: boolean; conflicted: boolean; output: string }> {
+  // git merge exits non-zero on conflict, but simple-git's raw() doesn't always throw — so the
+  // authoritative conflict signal is the unmerged (U) status afterwards, not a thrown error.
+  let output = '';
+  try {
+    output = await simpleGit(integDir).raw(['merge', '--no-edit', branch]);
+  } catch (err) {
+    output = err instanceof Error ? err.message : String(err);
+  }
+  const conflicts = await detectConflicts(integDir);
+  return { ok: conflicts.length === 0, conflicted: conflicts.length > 0, output };
+}
+
+/** Files with unresolved merge conflicts (git's unmerged `U` status). */
+export async function detectConflicts(integDir: string): Promise<string[]> {
+  const out = await simpleGit(integDir).raw(['diff', '--name-only', '--diff-filter=U']);
+  return out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+/** Abort an in-progress merge, restoring the integration branch to its pre-merge state. */
+export async function abortMerge(integDir: string): Promise<void> {
+  try {
+    await simpleGit(integDir).raw(['merge', '--abort']);
+  } catch {
+    /* nothing to abort */
+  }
+}
+
+/** Finalize a resolved merge (stage everything + commit). */
+export async function commitMerge(integDir: string, message: string): Promise<void> {
+  const git = simpleGit(integDir);
+  await git.raw(['add', '-A']);
+  await git.raw(['commit', '--no-edit', '-m', message]);
 }
 
 /**
