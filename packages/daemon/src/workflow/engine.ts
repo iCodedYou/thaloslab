@@ -156,7 +156,8 @@ export function createEngine(deps: EngineDeps) {
           ticketId,
           stageId: gate.id,
           kind: 'gate',
-          dependsOn: [gate.after],
+          // A gate with an empty `after` gates the whole plan (no upstream dep → ready immediately).
+          dependsOn: gate.after ? [gate.after] : [],
           state: 'pending',
           retryCount: 0,
           attempt: 0,

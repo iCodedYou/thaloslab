@@ -11,6 +11,9 @@ import { initLogger, log } from './logger';
 import { openDb } from './store/db';
 import { runMigrations } from './store/migrate';
 import { detectAll } from './providers/registry';
+import { createRuntime } from './workflow/runtime';
+import { recoverInFlight } from './workflow/recovery';
+import { registerWebSocket } from './server/ws';
 
 const VERSION = '0.0.0';
 
@@ -42,12 +45,19 @@ async function main(): Promise<void> {
   const detected = await detectAll();
   log('info', `provider detection: ${detected.map((p) => `${p.id}=${p.installed}`).join(', ')}`);
 
+  // Workflow engine runtime + crash recovery (reconcile in-flight tickets against disk).
+  const runtime = createRuntime();
+  const recovered = await recoverInFlight(runtime.engine);
+  if (recovered.length > 0) log('info', `recovered ${recovered.length} in-flight ticket(s)`);
+
   const startedAt = Date.now();
   let boundPort = DEFAULT_DAEMON_PORT;
 
   const app = buildApp({
     health: { version: VERSION, startedAt, getPort: () => boundPort },
+    runtime,
   });
+  await registerWebSocket(app, runtime);
   const servingUi = await registerStatic(app);
   log('info', servingUi ? 'serving bundled web UI' : 'no bundled UI (dev: Vite serves it)');
 

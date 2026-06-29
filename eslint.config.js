@@ -8,6 +8,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/.tsbuild/**',
       '**/node_modules/**',
+      'fixtures/**',
       '**/*.config.{js,cjs,mjs,ts}',
       'packages/daemon/migrations/**',
       'scripts/**',

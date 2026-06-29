@@ -1,0 +1,13 @@
+{
+  "name": "buggy-sample",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1 fixture: a seeded bug with a failing test. Dependency-free (plain node).",
+  "scripts": {
+    "build": "node -e \"process.exit(0)\"",
+    "typecheck": "node -e \"process.exit(0)\"",
+    "lint": "node -e \"process.exit(0)\"",
+    "test": "node test.mjs"
+  }
+}

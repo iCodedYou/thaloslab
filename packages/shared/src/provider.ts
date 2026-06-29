@@ -16,6 +16,7 @@ export interface InvokeOptions {
   allowedTools?: string[]; // maps to the CLI's own permission flags
   deniedCommands?: string[]; // restricted-commands enforcement
   network?: NetworkPosture;
+  model?: string; // specific model within the provider, if applicable
   timeoutMs?: number;
   mode: ExecutionMode;
 }
