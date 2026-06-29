@@ -13,6 +13,8 @@ function toTask(row: Row): Task {
     ticketId: row.ticketId,
     stageId: row.stageId,
     kind: row.kind as TaskKind,
+    laneId: row.laneId ?? `${row.ticketId}:main`,
+    seamPaths: row.seamPathsJson ? (JSON.parse(row.seamPathsJson) as string[]) : undefined,
     agentId: row.agentId ?? undefined,
     dependsOn: row.dependsOnJson ? (JSON.parse(row.dependsOnJson) as string[]) : [],
     worktreePath: row.worktreePath ?? undefined,
@@ -29,7 +31,11 @@ function toTask(row: Row): Task {
   };
 }
 
-export function insertTask(t: Task): Task {
+/** Input for inserting a task; `laneId` defaults to the ticket's main lane when omitted. */
+export type NewTask = Omit<Task, 'laneId'> & { laneId?: string };
+
+export function insertTask(t: NewTask): Task {
+  const laneId = t.laneId ?? `${t.ticketId}:main`;
   getDb()
     .insert(tasks)
     .values({
@@ -37,6 +43,8 @@ export function insertTask(t: Task): Task {
       ticketId: t.ticketId,
       stageId: t.stageId,
       kind: t.kind,
+      laneId,
+      seamPathsJson: t.seamPaths ? JSON.stringify(t.seamPaths) : null,
       agentId: t.agentId ?? null,
       dependsOnJson: JSON.stringify(t.dependsOn ?? []),
       worktreePath: t.worktreePath ?? null,
@@ -52,7 +60,7 @@ export function insertTask(t: Task): Task {
       createdAt: t.createdAt,
     })
     .run();
-  return t;
+  return { ...t, laneId };
 }
 
 export function getTask(id: string): Task | null {
@@ -66,6 +74,7 @@ export function listTasksByTicket(ticketId: string): Task[] {
 
 export interface TaskPatch {
   state?: TaskState;
+  laneId?: string;
   agentId?: string | null;
   worktreePath?: string | null;
   branch?: string | null;

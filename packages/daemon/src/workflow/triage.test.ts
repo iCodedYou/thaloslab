@@ -24,7 +24,13 @@ describe('keywordTriage', () => {
 describe('classifyTicket', () => {
   it('uses the classifier when it returns a result', async () => {
     const classifier: Classifier = () =>
-      Promise.resolve({ taskType: 'feature', mutating: true, blastRadius: ['data'] });
+      Promise.resolve({
+        taskType: 'feature',
+        mutating: true,
+        blastRadius: ['data'],
+        signalQuality: 'objective',
+        regressionSurface: 'high',
+      });
     const r = await classifyTicket('anything', '', classifier);
     expect(r.taskType).toBe('feature');
     expect(r.blastRadius).toEqual(['data']);

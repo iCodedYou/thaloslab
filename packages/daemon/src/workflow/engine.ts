@@ -73,6 +73,8 @@ export interface CreateTicketInput {
   body?: string;
   template: WorkflowTemplate;
   mode: ExecutionMode;
+  /** stage-role → agentId from assembly; sets each stage task's agentId (the invoke chokepoint). */
+  roleAgentId?: Record<string, string>;
 }
 
 const HUMAN_GATE_KIND = 'human';
@@ -136,12 +138,16 @@ export function createEngine(deps: EngineDeps) {
     insertTicket(ticket);
 
     // Materialize the task graph: one task per stage + one per HUMAN gate (parking node).
+    const lane = `${ticketId}:main`;
     for (const stage of input.template.stages) {
+      const agentId = stage.role !== 'custom' ? input.roleAgentId?.[stage.role] : undefined;
       insertTask({
         id: genId('tsk'),
         ticketId,
         stageId: stage.id,
         kind: 'stage',
+        laneId: lane,
+        agentId,
         dependsOn: stage.dependsOn,
         state: 'pending',
         retryCount: 0,
@@ -156,6 +162,7 @@ export function createEngine(deps: EngineDeps) {
           ticketId,
           stageId: gate.id,
           kind: 'gate',
+          laneId: lane,
           // A gate with an empty `after` gates the whole plan (no upstream dep → ready immediately).
           dependsOn: gate.after ? [gate.after] : [],
           state: 'pending',

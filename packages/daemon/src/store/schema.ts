@@ -66,6 +66,8 @@ export const tasks = sqliteTable(
     kind: text('kind', { enum: ['stage', 'gate'] })
       .notNull()
       .default('stage'),
+    laneId: text('lane_id'),
+    seamPathsJson: text('seam_paths_json'),
     agentId: text('agent_id').references(() => agents.id),
     dependsOnJson: text('depends_on_json'),
     worktreePath: text('worktree_path'),
@@ -80,7 +82,10 @@ export const tasks = sqliteTable(
     updatedAt: integer('updated_at'),
     createdAt: integer('created_at').notNull(),
   },
-  (t) => ({ ticketStateIdx: index('tasks_ticket_state_idx').on(t.ticketId, t.state) }),
+  (t) => ({
+    ticketStateIdx: index('tasks_ticket_state_idx').on(t.ticketId, t.state),
+    ticketLaneIdx: index('tasks_ticket_lane_idx').on(t.ticketId, t.laneId),
+  }),
 );
 
 export const runs = sqliteTable(

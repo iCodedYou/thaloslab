@@ -117,6 +117,17 @@ export interface StageDef {
   customRoleHint?: string; // for orchestrator-synthesized agents
   parallelizable?: boolean; // engineers fan out here
   loop?: { until: 'gates-green'; retryCap: number }; // the inner build loop
+  /**
+   * When set, a `passed` task at this stage expands into N child tasks (one per work item in the
+   * architect's decomposition artifact) — each on its own lane (isolated worktree). Downstream
+   * stages depending on `childStageId` become the all-of barrier (SPEC §9 parallel build).
+   */
+  fanOut?: {
+    childRole: AgentRole;
+    childStageId: string;
+    fromArtifact: ArtifactKind;
+    minChildren?: number;
+  };
   produces: ArtifactKind[];
   dependsOn: string[]; // stage ids
 }
@@ -128,6 +139,7 @@ export type GateCheck =
   | 'unit'
   | 'integration'
   | 'e2e'
+  | 'security'
   | 'benchmark'
   | 'a11y'
   | 'visual-diff';
@@ -199,6 +211,11 @@ export interface Task {
   kind: TaskKind;
   agentId?: string;
   dependsOn: string[];
+  /** Isolation unit: one git branch + worktree + gate-state. Sequential stages share a lane;
+   *  parallel fan-out children get distinct lanes. Defaults to `<ticketId>:main`. */
+  laneId: string;
+  /** Path ownership for a fan-out child (the architect-declared seam); enforced by the audit. */
+  seamPaths?: string[];
   worktreePath?: string;
   branch?: string;
   state: TaskState;

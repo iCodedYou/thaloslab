@@ -8,6 +8,10 @@ export interface TriageResult {
   mutating: boolean;
   /** Sensitive surfaces touched (auth/payments/data/infra) → mandatory security pass + deploy gate. */
   blastRadius: string[];
+  /** Objective (tests/numbers decide) vs subjective (taste) → human-in-the-loop density. */
+  signalQuality: 'objective' | 'subjective';
+  /** How much existing behavior is adjacent → weight on characterization + integration sweep. */
+  regressionSurface: 'low' | 'high';
 }
 
 const SENSITIVE: Array<{ kw: string[]; surface: string }> = [
@@ -50,10 +54,19 @@ export function keywordTriage(title: string, body = ''): TriageResult {
   const blastRadius = SENSITIVE.filter((s) => s.kw.some((k) => text.includes(k))).map(
     (s) => s.surface,
   );
+  const taskType = match?.type ?? 'bugfix';
   return {
-    taskType: match?.type ?? 'bugfix',
+    taskType,
     mutating: match?.mutating ?? true,
     blastRadius,
+    // Redesign is taste-driven (subjective); everything else is decided by tests/numbers.
+    signalQuality: taskType === 'redesign' ? 'subjective' : 'objective',
+    // Refactor/optimization/feature ride atop existing behavior → high regression surface.
+    regressionSurface: (['refactor', 'optimization', 'feature'] as const).some(
+      (t) => t === taskType,
+    )
+      ? 'high'
+      : 'low',
   };
 }
 

@@ -34,10 +34,10 @@ describe('worktree lifecycle', () => {
   it('creates a task worktree on a branch off thalos/integration (never main)', async () => {
     const wt = await createWorktree(repo, 'abc123');
     expect(fs.existsSync(wt.path)).toBe(true);
-    expect(wt.branch).toBe('thalos/task-abc123');
+    expect(wt.branch).toBe('thalos/lane-abc123');
     const branches = await simpleGit(repo).branchLocal();
     expect(branches.all).toContain(INTEGRATION_BRANCH);
-    expect(branches.all).toContain('thalos/task-abc123');
+    expect(branches.all).toContain('thalos/lane-abc123');
   });
 
   it('scope audit: clean when work stays in the worktree, flags writes to the main repo', async () => {
@@ -73,12 +73,32 @@ describe('worktree lifecycle', () => {
     expect(onMain.trim()).toBe('original');
   });
 
+  it('slugs colon lane ids and ADOPTS an existing lane on a second call (crash recovery)', async () => {
+    const wt1 = await createWorktree(repo, 'tk:seam-0');
+    expect(wt1.branch).toBe('thalos/lane-tk-seam-0');
+    fs.writeFileSync(path.join(wt1.path, 'work.txt'), 'in progress\n');
+
+    // The in-memory cache is gone (simulated by calling again) but the lane survives on disk —
+    // a second create must adopt it, not throw "branch/worktree already exists".
+    const wt2 = await createWorktree(repo, 'tk:seam-0');
+    expect(wt2.path).toBe(wt1.path);
+    expect(wt2.branch).toBe(wt1.branch);
+    expect(fs.existsSync(path.join(wt2.path, 'work.txt'))).toBe(true);
+  });
+
+  it('isolates distinct lanes in distinct worktrees + branches', async () => {
+    const a = await createWorktree(repo, 'tk:seam-0');
+    const b = await createWorktree(repo, 'tk:seam-1');
+    expect(a.path).not.toBe(b.path);
+    expect(a.branch).not.toBe(b.branch);
+  });
+
   it('teardown removes the worktree but retains the branch', async () => {
     const wt = await createWorktree(repo, 'abc123');
     const result = await teardownWorktree(repo, wt);
     expect(result.removed).toBe(true);
     expect(fs.existsSync(wt.path)).toBe(false);
     const branches = await simpleGit(repo).branchLocal();
-    expect(branches.all).toContain('thalos/task-abc123'); // branch retained
+    expect(branches.all).toContain('thalos/lane-abc123'); // branch retained
   });
 });
