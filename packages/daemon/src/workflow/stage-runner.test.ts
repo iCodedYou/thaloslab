@@ -11,6 +11,7 @@ process.env.THALOS_DB_PATH = dbFile;
 const { openDb, closeDb } = await import('../store/db');
 const { runMigrations } = await import('../store/migrate');
 const { insertProject } = await import('../store/repositories/projects');
+const { upsertProvider } = await import('../store/repositories/providers');
 const { insertTicket } = await import('../store/repositories/tickets');
 const { insertTask, getTask } = await import('../store/repositories/tasks');
 const { recentRunsForTask } = await import('../store/repositories/runs');
@@ -31,6 +32,14 @@ const template: WorkflowTemplate = {
 
 beforeAll(async () => {
   runMigrations(openDb());
+  upsertProvider({
+    id: 'claude',
+    kind: 'local',
+    displayName: 'Claude',
+    installed: true,
+    authenticated: true,
+    lastChecked: 1,
+  });
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'thalos-sr-repo-'));
   const git = simpleGit(repo);
   await git.init(['-b', 'main']);
@@ -103,9 +112,11 @@ describe('production StageRunner in --mock', () => {
     expect(fs.existsSync(path.join(task.worktreePath!, 'app.ts'))).toBe(true);
     expect(fs.readFileSync(path.join(task.worktreePath!, 'app.ts'), 'utf8')).toContain('fixed');
 
-    // A run row was persisted and finalized.
+    // A run row was persisted and finalized — recording the LOGICAL routed provider (the seeded
+    // claude), NOT the mock adapter id, so routing is auditable even in --mock.
     const runs = recentRunsForTask('task1');
     expect(runs.length).toBeGreaterThan(0);
     expect(runs[0]?.status).toBe('ok');
+    expect(runs[0]?.provider).toBe('claude');
   });
 });

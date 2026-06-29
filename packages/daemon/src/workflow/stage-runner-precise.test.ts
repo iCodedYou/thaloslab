@@ -19,6 +19,7 @@ process.env.THALOS_DB_PATH = dbFile;
 const { openDb, closeDb } = await import('../store/db');
 const { runMigrations } = await import('../store/migrate');
 const { insertProject } = await import('../store/repositories/projects');
+const { upsertProvider } = await import('../store/repositories/providers');
 const { insertTicket } = await import('../store/repositories/tickets');
 const { insertTask, getTask } = await import('../store/repositories/tasks');
 const { EventBus } = await import('./events');
@@ -58,6 +59,14 @@ const template: WorkflowTemplate = {
 
 beforeAll(async () => {
   runMigrations(openDb());
+  upsertProvider({
+    id: 'claude',
+    kind: 'local',
+    displayName: 'Claude',
+    installed: true,
+    authenticated: true,
+    lastChecked: 1,
+  });
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'thalos-precise-repo-'));
   const git = simpleGit(repo);
   await git.init(['-b', 'main']);

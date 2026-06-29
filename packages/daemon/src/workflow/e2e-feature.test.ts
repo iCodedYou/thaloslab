@@ -18,6 +18,7 @@ process.env.THALOS_DB_PATH = dbFile;
 const { openDb, closeDb } = await import('../store/db');
 const { runMigrations } = await import('../store/migrate');
 const { insertProject } = await import('../store/repositories/projects');
+const { upsertProvider } = await import('../store/repositories/providers');
 const { getTicket } = await import('../store/repositories/tickets');
 const { listGatesByTicket } = await import('../store/repositories/gates');
 const { listTasksByTicket } = await import('../store/repositories/tasks');
@@ -30,6 +31,14 @@ let mainHeadBefore: string;
 
 beforeAll(async () => {
   runMigrations(openDb());
+  upsertProvider({
+    id: 'claude',
+    kind: 'local',
+    displayName: 'Claude',
+    installed: true,
+    authenticated: true,
+    lastChecked: 1,
+  });
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'thalos-e2e-repo-'));
   const git = simpleGit(repo);
   await git.init(['-b', 'main']);

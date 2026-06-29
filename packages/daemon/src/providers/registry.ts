@@ -7,9 +7,11 @@ import type {
   ProviderAdapter,
   ProviderId,
 } from '@thaloslab/shared';
-import { upsertProvider } from '../store/repositories/providers';
+import { getProject } from '../store/repositories/projects';
+import { listProviders, upsertProvider } from '../store/repositories/providers';
 import { claudeAdapter } from './claude';
 import { mockAdapter } from './mock';
+import type { RouterCtx } from './router';
 
 const adapters: ProviderAdapter[] = [claudeAdapter];
 
@@ -30,6 +32,26 @@ export function adapterFor(providerId: ProviderId, mode: ExecutionMode): Provide
   const adapter = getAdapter(providerId);
   if (!adapter) throw new Error(`no provider adapter for "${providerId}"`);
   return adapter;
+}
+
+/**
+ * Build the router context from live state: detected providers (availability), the project's
+ * preference order (defaults to detection/registration order), and the per-provider `enforce` →
+ * `unmet` filter (minus any constraints the policy marked `relaxable`).
+ */
+export function routerCtx(projectId?: string): RouterCtx {
+  const configured = projectId
+    ? (getProject(projectId)?.routingPolicy?.preferenceOrder as ProviderId[] | undefined)
+    : undefined;
+  return {
+    availability: listProviders(),
+    preferenceOrder: configured ?? adapters.map((a) => a.id),
+    unmetFor: (id, policy) => {
+      const adapter = getAdapter(id);
+      if (!adapter) return ['no-adapter'];
+      return adapter.enforce(policy).unmet.filter((u) => !policy.relaxable?.includes(u));
+    },
+  };
 }
 
 export async function detectAll(): Promise<DetectedProvider[]> {

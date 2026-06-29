@@ -133,6 +133,14 @@ export function mergeResolvePolicy(agent: AgentConfig): ToolPolicy {
   };
 }
 
+/** Per-role cross-provider differ-rule (SPEC §5): the adversarial reviewer MUST run on a different
+ *  provider than the engineer; the security auditor PREFERS to; everyone else has no constraint. */
+export function differFor(role: AgentRole): 'must' | 'prefer' | 'none' {
+  if (role === 'reviewer') return 'must';
+  if (role === 'security-auditor') return 'prefer';
+  return 'none';
+}
+
 /** Clamp a synthesized (orchestrator-created) agent to least-privilege (DECISIONS #5). */
 export function clampSynthesized(a: AgentConfig): AgentConfig {
   if (a.createdBy !== 'orchestrator') return a;
@@ -154,7 +162,7 @@ export function agentFromRole(args: {
     projectId: args.projectId,
     role: args.role,
     name: args.name,
-    provider: 'claude',
+    provider: 'auto', // the router resolves a concrete provider at assembly + invoke time
     systemPrompt: d.systemPrompt,
     authority: d.authority,
     access: d.access,

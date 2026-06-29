@@ -3,10 +3,13 @@
 // triage, and — unless preview — advance the engine. The typed OrchestratorMessage stream is
 // rendered by the engine as state transitions occur.
 import type { ExecutionMode, Ticket } from '@thaloslab/shared';
+import { routerCtx } from '../../providers/registry';
+import { assignProvider } from '../../providers/router';
 import { upsertAgent, writeAgentFile } from '../../store/repositories/agents';
 import { getProject } from '../../store/repositories/projects';
 import { getTicket, updateTicketTriage } from '../../store/repositories/tickets';
 import type { Engine } from '../engine';
+import { policyFor } from '../roster/role-defaults';
 import { selectTemplate } from '../templates';
 import { type Classifier, classifyTicket } from '../triage';
 import { assemble } from './assembly';
@@ -29,11 +32,16 @@ export async function intakeTicket(
   // Data-driven assembly: triage → roster + policy-injected gates + role→agentId.
   const { template, roster, roleAgentId } = assemble(req.projectId, triage, baseTemplate);
 
-  // Persist the assembled roster (DB index + git-tracked .thalos/agents mirror).
+  // Persist the assembled roster (DB index + git-tracked .thalos/agents mirror). Resolve each
+  // agent's 'auto' provider to a concrete PREFERRED provider via the router (the invoke-time
+  // resolution re-checks + enforces the reviewer-differs rule against the engineer's actual run).
   const repoPath = getProject(req.projectId)?.repoPath;
+  const ctx = routerCtx(req.projectId);
   for (const agent of roster) {
-    upsertAgent(agent);
-    if (repoPath) writeAgentFile(repoPath, agent);
+    const resolved = assignProvider(ctx, policyFor(agent));
+    const withProvider = resolved ? { ...agent, provider: resolved } : agent;
+    upsertAgent(withProvider);
+    if (repoPath) writeAgentFile(repoPath, withProvider);
   }
 
   const ticket = engine.createTicketFromTemplate({

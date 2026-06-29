@@ -6,15 +6,19 @@ import * as schema from './schema';
 
 export type DB = BetterSQLite3Database<typeof schema>;
 
-let instance: { db: DB; raw: Database.Database } | null = null;
+let instance: { db: DB; raw: Database.Database; path: string } | null = null;
 
 export function openDb(): DB {
-  if (instance) return instance.db;
-  const raw = new Database(dbPath());
+  const path = dbPath();
+  // Reopen if the target path changed (e.g. a test sets THALOS_DB_PATH); avoids a stale handle
+  // pointing at a different database than the caller expects under worker reuse.
+  if (instance && instance.path === path) return instance.db;
+  if (instance) instance.raw.close();
+  const raw = new Database(path);
   raw.pragma('journal_mode = WAL');
   raw.pragma('foreign_keys = ON');
   const db = drizzle(raw, { schema });
-  instance = { db, raw };
+  instance = { db, raw, path };
   return db;
 }
 

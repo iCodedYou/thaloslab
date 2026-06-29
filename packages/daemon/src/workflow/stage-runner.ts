@@ -14,11 +14,14 @@ import type {
   ExecutionMode,
   GateCheck,
   InvokeOptions,
+  ProviderId,
   Ticket,
 } from '@thaloslab/shared';
-import { adapterFor } from '../providers/registry';
+import { adapterFor, routerCtx as defaultRouterCtx } from '../providers/registry';
+import { type RouterCtx, resolveForInvoke } from '../providers/router';
 import { getAgent } from '../store/repositories/agents';
 import { getProject } from '../store/repositories/projects';
+import { recentRunsForTask } from '../store/repositories/runs';
 import { listTasksByTicket, updateTask } from '../store/repositories/tasks';
 import { getTicket } from '../store/repositories/tickets';
 import type { EventBus } from './events';
@@ -43,6 +46,7 @@ import {
 import {
   agentFromRole,
   clampSynthesized,
+  differFor,
   mergeResolvePolicy,
   policyFor,
 } from './roster/role-defaults';
@@ -83,10 +87,30 @@ function resolveAgent(agentId: string | undefined, role: AgentRole | 'custom'): 
 export interface StageRunnerDeps {
   bus: EventBus;
   now?: () => number;
+  /** Injectable for tests (fail-closed / reviewer-differs). Defaults to the live registry context. */
+  routerCtx?: (projectId?: string) => RouterCtx;
+}
+
+/** The engineer's ACTUAL provider for this change — read from the run of the task(s) this one
+ *  depends on — so the reviewer can be routed to a different one. */
+function avoidProviderFor(ticketId: string, task: { dependsOn: string[] }): ProviderId | undefined {
+  const upstream = listTasksByTicket(ticketId).filter((t) => task.dependsOn.includes(t.stageId));
+  for (const u of upstream) {
+    const run = recentRunsForTask(u.id).find((r) => r.provider);
+    if (run?.provider) return run.provider as ProviderId;
+  }
+  return undefined;
+}
+
+/** AgentConfig.provider as a concrete ProviderId, or undefined for 'auto'/'collab:'. */
+function preferredProvider(agent: AgentConfig): ProviderId | undefined {
+  const p = agent.provider;
+  return p !== 'auto' && !p.startsWith('collab:') ? (p as ProviderId) : undefined;
 }
 
 export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner {
   const now = deps.now ?? (() => Date.now());
+  const buildRouterCtx = deps.routerCtx ?? defaultRouterCtx;
   // One worktree per LANE — sequential stages share a lane; parallel fan-out children get distinct
   // lanes (isolated worktrees). The Map is a cache, NOT truth: createWorktree adopts-or-creates so a
   // crash that loses this Map but leaves the lane on disk recovers cleanly.
@@ -272,21 +296,36 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         });
 
       // Bounded merge-scoped resolve; the FULL gate must pass before we accept the merge.
+      const resolverAgent = resolveAgent(undefined, 'integrator');
+      const resolverPolicy = mergeResolvePolicy(resolverAgent);
+      const resolverRoute = resolveForInvoke(buildRouterCtx(ticket?.projectId), {
+        policy: resolverPolicy,
+        differ: 'none',
+      });
+      if (resolverRoute.kind === 'park') {
+        await abortMerge(integDir);
+        return {
+          ok: false,
+          escalate: true,
+          changedFiles: branches,
+          output: `merge-resolver routing failed closed: ${resolverRoute.reason}`,
+        };
+      }
       let resolved = false;
       for (let attempt = 0; attempt < 2 && !resolved; attempt++) {
-        const agent = resolveAgent(undefined, 'integrator');
         const opts: InvokeOptions = {
           prompt: `Resolve ONLY the merge conflict markers in: ${conflicts.join(', ')}. Do not rewrite logic to force a green build.`,
-          systemPrompt: agent.systemPrompt,
+          systemPrompt: resolverAgent.systemPrompt,
           cwd: integDir,
-          policy: mergeResolvePolicy(agent),
+          policy: resolverPolicy,
           timeoutMs: 5 * 60_000,
           mode,
         };
-        await executeRun(adapterFor('claude', mode), opts, {
+        await executeRun(adapterFor(resolverRoute.provider, mode), opts, {
           ticketId,
           taskId: task.id,
           agentId: undefined,
+          provider: resolverRoute.provider,
           bus: deps.bus,
           now,
         });
@@ -352,6 +391,26 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       // thalos/integration with conflict orchestration.
       if (role === 'integrator') return runIntegration(ctx, repoPath, ticket);
 
+      // Resolve the provider + policy BEFORE any side effect (no worktree if routing fails closed).
+      // Single chokepoint: ALL invoke policy derives from the resolved agent's AgentConfig.
+      const agent = resolveAgent(task.agentId, role);
+      const policy = policyFor(agent);
+      const differ = differFor(role);
+      const resolution = resolveForInvoke(buildRouterCtx(ticket?.projectId), {
+        policy,
+        avoidProvider: differ !== 'none' ? avoidProviderFor(ticketId, task) : undefined,
+        differ,
+      });
+      if (resolution.kind === 'park') {
+        return {
+          ok: false,
+          escalate: true,
+          changedFiles: [],
+          output: `provider routing failed closed for ${role}: ${resolution.reason}`,
+        };
+      }
+      const providerId = resolution.provider;
+
       const wt = await ensureWorktree(repoPath, task.laneId);
       if (task.worktreePath !== wt.path) {
         updateTask(task.id, { worktreePath: wt.path, branch: wt.branch });
@@ -366,8 +425,6 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         baseline = await runSuite(unitCmd, wt.path, defaultSuiteParser);
       }
 
-      // Single chokepoint: ALL invoke policy derives from the resolved agent's AgentConfig.
-      const agent = resolveAgent(task.agentId, role);
       const seamNote = task.seamPaths?.length
         ? `\nYour seam (only touch these paths): ${task.seamPaths.join(', ')}`
         : '';
@@ -376,12 +433,12 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       const fanOutNote = stage?.fanOut
         ? `\nWrite a file named "decomposition.json" at the repo root: a JSON array where each element is {"seamPaths": ["dir-or-file", ...], "summary": "..."}. Every lane's seamPaths MUST be DISJOINT from every other lane's (no shared files/dirs). Split only along clean, independent seams; if there is no clean split, return a single element.`
         : '';
-      const provider = adapterFor('claude', mode);
+      const provider = adapterFor(providerId, mode);
       const opts: InvokeOptions = {
         prompt: `Ticket: ${ticket?.title ?? ''}\nStage: ${task.stageId} (role: ${agent.role}).${seamNote}${fanOutNote}\n${ticket?.body ?? ''}`,
         systemPrompt: agent.systemPrompt,
         cwd: wt.path,
-        policy: policyFor(agent),
+        policy,
         timeoutMs: 5 * 60_000,
         mode,
       };
@@ -389,6 +446,8 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         ticketId,
         taskId: task.id,
         agentId: task.agentId,
+        provider: providerId,
+        requestedProvider: preferredProvider(agent),
         bus: deps.bus,
         now,
       });
