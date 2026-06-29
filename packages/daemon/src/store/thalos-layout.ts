@@ -55,6 +55,23 @@ export function scaffoldThalos(repoPath: string, config: ThalosConfig): void {
   if (!fs.existsSync(agentsKeep)) fs.writeFileSync(agentsKeep, '', 'utf8');
 }
 
+/** Best-effort mirror of the project phase into .thalos/config.json. The DB is authoritative; this
+ *  is a derived artifact (rewritten from the DB on boot), so a failure here is non-fatal — never let
+ *  a config write failure block the transition. */
+export function mirrorConfigPhase(repoPath: string, phase: ThalosConfig['phase']): void {
+  try {
+    const existing = readThalosConfig(repoPath);
+    if (!existing) return;
+    fs.writeFileSync(
+      path.join(thalosDir(repoPath), THALOS_CONFIG_NAME),
+      `${JSON.stringify({ ...existing, phase }, null, 2)}\n`,
+      'utf8',
+    );
+  } catch {
+    /* DB is the source of truth; config.json is re-derived on boot */
+  }
+}
+
 export function readThalosConfig(repoPath: string): ThalosConfig | null {
   try {
     const raw = fs.readFileSync(path.join(thalosDir(repoPath), THALOS_CONFIG_NAME), 'utf8');

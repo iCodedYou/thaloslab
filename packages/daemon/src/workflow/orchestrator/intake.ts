@@ -2,17 +2,33 @@
 // template, create the ticket (which renders the plan-of-attack message + DAG), persist the
 // triage, and — unless preview — advance the engine. The typed OrchestratorMessage stream is
 // rendered by the engine as state transitions occur.
-import type { ExecutionMode, Ticket } from '@thaloslab/shared';
+import type { ExecutionMode, Ticket, TicketStatus } from '@thaloslab/shared';
 import { routerCtx } from '../../providers/registry';
 import { assignProvider } from '../../providers/router';
 import { upsertAgent, writeAgentFile } from '../../store/repositories/agents';
 import { getProject } from '../../store/repositories/projects';
-import { getTicket, updateTicketTriage } from '../../store/repositories/tickets';
+import { getTicket, listTickets, updateTicketTriage } from '../../store/repositories/tickets';
 import type { Engine } from '../engine';
 import { policyFor } from '../roster/role-defaults';
-import { selectTemplate } from '../templates';
+import { greenfieldTemplate, selectTemplate } from '../templates';
 import { type Classifier, classifyTicket } from '../triage';
 import { assemble } from './assembly';
+
+const TERMINAL_TICKET: TicketStatus[] = [
+  'done',
+  'failed',
+  'escalated',
+  'aborted',
+  'preview-complete',
+];
+
+/** A from-scratch project still needs its MVP iff it's in `bootstrapping` AND no greenfield ticket
+ *  has reached terminal `done`. Bound to *completed* (not merely existing) so a failed/escalated
+ *  first attempt re-enters greenfield rather than being stranded in maintenance against no baseline. */
+function greenfieldNeeded(projectId: string, phase: string | undefined): boolean {
+  if (phase !== 'bootstrapping') return false;
+  return !listTickets(projectId).some((t) => t.workflowId === 'greenfield' && t.status === 'done');
+}
 
 export interface IntakeRequest {
   projectId: string;
@@ -27,15 +43,34 @@ export async function intakeTicket(
   classifier?: Classifier,
 ): Promise<Ticket> {
   const triage = await classifyTicket(req.title, req.body ?? '', classifier);
-  const baseTemplate = selectTemplate(triage.taskType);
 
-  // Data-driven assembly: triage → roster + policy-injected gates + role→agentId.
-  const { template, roster, roleAgentId } = assemble(req.projectId, triage, baseTemplate);
+  // Greenfield is chosen by project PHASE, not by triage keywords (triage still runs — its blast
+  // radius drives the security-audit injection, which a greenfield MVP must always carry). The first
+  // ticket on a bootstrapping project IS the MVP build.
+  const project = getProject(req.projectId);
+  const useGreenfield = greenfieldNeeded(req.projectId, project?.phase);
+  if (useGreenfield) {
+    // One MVP build at a time: reject a second ticket while a greenfield ticket is still in flight.
+    const inflight = listTickets(req.projectId).some(
+      (t) => t.workflowId === 'greenfield' && !TERMINAL_TICKET.includes(t.status),
+    );
+    if (inflight) {
+      throw new Error('a greenfield MVP build is already in progress for this project');
+    }
+  }
+  const baseTemplate = useGreenfield ? greenfieldTemplate : selectTemplate(triage.taskType);
+
+  // Data-driven assembly: triage → roster + policy-injected gates + role→agentId. Greenfield carries
+  // its OWN correctly-placed security + pre-ship gates (the template), so we suppress assembly's
+  // blast-radius gate injection for it — that injection targets the FIRST engineer/integrator stage,
+  // which in greenfield is the scaffold / scaffold-integrate (mid-workflow), not the final build.
+  const assemblyTriage = useGreenfield ? { ...triage, blastRadius: [] } : triage;
+  const { template, roster, roleAgentId } = assemble(req.projectId, assemblyTriage, baseTemplate);
 
   // Persist the assembled roster (DB index + git-tracked .thalos/agents mirror). Resolve each
   // agent's 'auto' provider to a concrete PREFERRED provider via the router (the invoke-time
   // resolution re-checks + enforces the reviewer-differs rule against the engineer's actual run).
-  const repoPath = getProject(req.projectId)?.repoPath;
+  const repoPath = project?.repoPath;
   const ctx = routerCtx(req.projectId);
   for (const agent of roster) {
     const resolved = assignProvider(ctx, policyFor(agent));

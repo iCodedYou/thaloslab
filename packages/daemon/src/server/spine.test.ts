@@ -25,7 +25,8 @@ beforeAll(async () => {
     name: 'P',
     repoPath: '/tmp/p',
     origin: 'scratch',
-    phase: 'bootstrapping',
+    // Maintenance: the spine test drives a bug-fix through the plan gate, not greenfield bootstrapping.
+    phase: 'maintenance',
     orchestratorProvider: 'claude',
     createdAt: 1,
   });

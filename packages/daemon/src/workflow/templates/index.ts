@@ -3,6 +3,7 @@
 import type { TaskType, WorkflowTemplate } from '@thaloslab/shared';
 import { bugFixTemplate } from './bug-fix';
 import { featureTemplate } from './feature';
+import { greenfieldTemplate } from './greenfield';
 import { optimizationTemplate } from './optimization';
 import { redesignTemplate } from './redesign';
 import { refactorTemplate } from './refactor';
@@ -15,6 +16,7 @@ const TEMPLATES: WorkflowTemplate[] = [
   optimizationTemplate,
   redesignTemplate,
   refactorTemplate,
+  greenfieldTemplate,
 ];
 
 export function allTemplates(): WorkflowTemplate[] {
@@ -33,6 +35,7 @@ export function selectTemplate(taskType: TaskType): WorkflowTemplate {
 export {
   bugFixTemplate,
   featureTemplate,
+  greenfieldTemplate,
   securityAuditTemplate,
   optimizationTemplate,
   redesignTemplate,

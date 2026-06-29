@@ -1,6 +1,6 @@
 // Data access for the `projects` table (one of two repositories built in Phase 0, DECISIONS #19).
 import { eq } from 'drizzle-orm';
-import type { Project } from '@thaloslab/shared';
+import type { Project, ProjectPhase } from '@thaloslab/shared';
 import { getDb } from '../db';
 import { projects } from '../schema';
 
@@ -29,6 +29,12 @@ export function listProjects(): Project[] {
 export function getProject(id: string): Project | null {
   const row = getDb().select().from(projects).where(eq(projects.id, id)).get();
   return row ? toProject(row) : null;
+}
+
+/** Flip a project's lifecycle phase (the DB is authoritative; .thalos/config.json is a mirror). The
+ *  only mutation of `projects` so far — a one-column update, kept minimal (Phase 4 transition). */
+export function setProjectPhase(id: string, phase: ProjectPhase): void {
+  getDb().update(projects).set({ phase }).where(eq(projects.id, id)).run();
 }
 
 export function insertProject(p: Project): Project {

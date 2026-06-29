@@ -19,7 +19,8 @@ export type TaskType =
   | 'optimization'
   | 'refactor'
   | 'docs'
-  | 'investigation';
+  | 'investigation'
+  | 'greenfield';
 
 /** Durable artifact kinds written under a project's `.thalos/artifacts/` (SPEC §7). */
 export type ArtifactKind =

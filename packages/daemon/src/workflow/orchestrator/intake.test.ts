@@ -35,7 +35,9 @@ beforeAll(() => {
     name: 'P',
     repoPath: '/tmp/p',
     origin: 'scratch',
-    phase: 'bootstrapping',
+    // Maintenance: this suite tests triage→template routing, not greenfield bootstrapping (which is
+    // phase-driven). A bootstrapping project's first ticket would route to the greenfield workflow.
+    phase: 'maintenance',
     orchestratorProvider: 'claude',
     createdAt: 1,
   });

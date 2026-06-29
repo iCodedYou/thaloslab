@@ -20,8 +20,9 @@ import { listAgentsByProject } from '../store/repositories/agents';
 import { getDb } from '../store/db';
 import { getGate, insertGate, resolveGate } from '../store/repositories/gates';
 import { insertMessage } from '../store/repositories/messages';
-import { getProject } from '../store/repositories/projects';
+import { getProject, setProjectPhase } from '../store/repositories/projects';
 import { recentRunsForTask } from '../store/repositories/runs';
+import { mirrorConfigPhase } from '../store/thalos-layout';
 import {
   type TaskPatch,
   claimTaskState,
@@ -600,6 +601,17 @@ export function createEngine(deps: EngineDeps) {
       setTicketStatus(ticketId, 'done');
       const ticket = getTicket(ticketId);
       if (ticket) {
+        // Bootstrapping→Maintenance transition (SPEC §6): a from-scratch project flips to maintenance
+        // ONLY when its greenfield ticket reaches terminal `done` — i.e. the spec's acceptance
+        // criteria are met. Bound to this done-path (never reachable from the escalate/fail branches
+        // above), guarded by phase so it's idempotent under reconcile's repeats and terminal-absorb.
+        if (ticket.workflowId === 'greenfield') {
+          const project = getProject(ticket.projectId);
+          if (project?.phase === 'bootstrapping') {
+            setProjectPhase(project.id, 'maintenance');
+            mirrorConfigPhase(project.repoPath, 'maintenance');
+          }
+        }
         insertMessage({
           id: genId('msg'),
           projectId: ticket.projectId,
