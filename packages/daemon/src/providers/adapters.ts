@@ -11,12 +11,32 @@ import { mockFor } from './mock';
 // Registration order is the default preference order (claude > codex > gemini), per-project overridable.
 const adapters: ProviderAdapter[] = [claudeAdapter, codexAdapter, geminiAdapter];
 
+// Dynamic adapters — collab peer providers (`collab:<peerId>:<vendor>`) registered per ROUTABLE peer and
+// removed on revoke/disable, so the router sees a pooled provider exactly while it is admitted+verified.
+const dynamic = new Map<ProviderId, ProviderAdapter>();
+
 export function getAdapters(): ProviderAdapter[] {
-  return adapters;
+  return [...adapters, ...dynamic.values()];
 }
 
 export function getAdapter(id: ProviderId): ProviderAdapter | undefined {
-  return adapters.find((a) => a.id === id);
+  return adapters.find((a) => a.id === id) ?? dynamic.get(id);
+}
+
+/** Register a dynamic (collab) adapter; idempotent by id. */
+export function registerAdapter(adapter: ProviderAdapter): void {
+  dynamic.set(adapter.id, adapter);
+}
+
+/** Remove a dynamic adapter (revoke/disable). No-op if absent. */
+export function unregisterAdapter(id: ProviderId): void {
+  dynamic.delete(id);
+}
+
+/** Remove every `collab:<peerId>:*` adapter (a peer was revoked or collab disabled). */
+export function unregisterPeerAdapters(peerId: string): void {
+  const prefix = `collab:${peerId}:`;
+  for (const id of [...dynamic.keys()]) if (id.startsWith(prefix)) dynamic.delete(id);
 }
 
 /**

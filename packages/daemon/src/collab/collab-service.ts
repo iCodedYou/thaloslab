@@ -1,6 +1,8 @@
 // Coordinates the pure trust state machine (CollabHost / CollabRuntime) with the real socket
 // (CollabEndpoint), so enable/disable/admit/revoke drive BOTH atomically. CollabHost stays a pure,
 // deterministic predicate source; this service is the only place that also touches the listener/sockets.
+import type { ProviderAdapter } from '@thaloslab/shared';
+import { registerAdapter, unregisterPeerAdapters } from '../providers/adapters';
 import { peerRoutable } from './protocol';
 import { CollabRuntime, collab } from './runtime';
 import { collabBindHost, collabPort } from './wire/bind';
@@ -36,10 +38,12 @@ export class CollabService {
     return this.endpoint.start({ host, port: opts.port ?? collabPort() });
   }
 
-  /** Collab off → blanket-revoke every session AND close the listener (back to no-listener). */
+  /** Collab off → blanket-revoke every session, close the listener, and drop every pooled provider. */
   async disable(): Promise<void> {
+    const peers = this.rt.state().peers.map((p) => p.peerId);
     this.rt.host.disable();
     await this.endpoint.stop();
+    for (const peerId of peers) unregisterPeerAdapters(peerId);
   }
 
   /** The explicit human admit — flips pending → admitted and notifies the parked socket. */
@@ -48,10 +52,20 @@ export class CollabService {
     this.endpoint.notifyAdmitted(peerId);
   }
 
-  /** Revoke → mark revoked AND immediately sever the live socket. */
+  /**
+   * Register a pooled provider for an admitted, routable peer so the router sees `collab:<peer>:<vendor>`
+   * exactly while it is admitted. The StageRunner builds the adapter (it has the lane's repo/seam) and
+   * registers it here; revoke/disable removes it.
+   */
+  registerPeerAdapter(adapter: ProviderAdapter): void {
+    registerAdapter(adapter);
+  }
+
+  /** Revoke → mark revoked, sever the live socket, AND remove every pooled provider from this peer. */
   revoke(peerId: string): void {
     this.rt.host.revoke(peerId);
     this.endpoint.sever(peerId, 'revoked');
+    unregisterPeerAdapters(peerId);
   }
 
   /** A push handle, or null if the peer is not authorized (the structural admit gate). */

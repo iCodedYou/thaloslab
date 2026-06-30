@@ -363,7 +363,9 @@ away). *Refines SPEC §4 / §13 / §15.*
 | `DEFERRED-PENDING-BUDGET` | the `--live` greenfield smoke (Phase 4) | a manual capped build on real `pnpm` (≤2 lanes/300k tok/$5/15min/12 invokes; first cap ABORTS) |
 | ✅ `VERIFIED-ON-LINUX` (2026-06-30) | real bubblewrap confinement (Phase 5) — **VERIFIED** | DONE: the real self-test's escape probe was genuinely DENIED on kernel `6.18.33.2-microsoft-standard-WSL2` + bubblewrap 0.11.1 — fs by host-readback, net by `ENETUNREACH` under `--unshare-net` ⇒ `selfTest().ok=true`; the router relaxation then un-pinned a Codex builder, while Noop re-pinned to Claude. See "Phase 5 sandbox — VERIFIED-ON-LINUX" below |
 | `DEFERRED-PENDING-MACOS` | sandbox-exec/Lima (not yet implemented) (Phase 5) | the same self-test on macOS |
-| `DEFERRED-PENDING-MULTI-MACHINE` | the real cross-machine collab wire (Phase 5) | a real remote peer over the tunnel (the mock proved the trust logic, not the wire) |
+| `DEFERRED-PENDING-MULTI-MACHINE` | **cross-HOST** collab networking — NAT/tunnel (cloudflared/ngrok)/latency/a genuinely remote peer + the off-loopback bind (Phase 5). The WIRE itself (transport + protocol + trust state machine) is now PROVEN two-process-on-one-machine over a real socket; what remains is real *networking* between machines | a real second machine joins over the tunnel and runs the collab suite; the off-loopback bind opt-in implemented + reviewed |
+| `DEFERRED` (collab — jail-over-wire) | a peer GENUINELY bubblewrap-jailing the host's task *over the wire* (Phase 5). The Wire D happy-path peer used a test SEAM (`confiningBackend`), NOT a real jail — it proves the wire + quarantine flow, not confinement-over-the-wire | run the peer-agent in WSL (the daemon stack on Linux) so its REAL bubblewrap jail (VERIFIED-ON-LINUX) confines a task arriving over the real socket |
+| `DEFERRED` (collab — real-provider) | a REAL provider (Claude/Codex/Gemini) executing a peer's task over the wire with real tokens (Phase 5). The wire tests run the peer in `--mock` (deterministic, zero cost) | a capped `--live` collab smoke: a real CLI runs a peer's task end to end over the socket |
 | `DEFERRED-PENDING-TOOLCHAIN` | the native Tauri `tauri build` + packaged-app runtime smoke (Phase 6) | on a Rust box: build the shell, confirm the window truly loads `127.0.0.1:8473`, the CSP is enforced by the webview, and the sidecar truly reuses the daemon (the config-lint proves the locked-down intent, not the running app) |
 | `DEFERRED` (no target) | the per-domain network-allowlist filtering proxy (Phase 5) | n/a — only `network:none` is jail-enforceable, so `network:allowlist` stays Claude-pinned |
 
@@ -410,10 +412,15 @@ one is no longer deferred.
   --ro-bind / / --tmpfs /tmp --proc /proc --dev /dev --bind <rw> <rw> --unshare-net`.
 - **DEFERRED-PENDING-MACOS:** the future sandbox-exec/Lima jail's REAL confinement — the same self-test on
   macOS. Until then: present-but-unverified ⇒ treated as Noop (no relaxation, collab fail-closed).
-- **DEFERRED-PENDING-MULTI-MACHINE:** the real cross-machine collab wire (the Fastify collab endpoint +
-  tunnel + a real remote peer). The in-process mock peer proves the trust/strip/quarantine LOGIC; it does
-  NOT prove a real remote peer over a real wire behaves. *First thing to run when a second machine is
-  available.*
+- **DEFERRED-PENDING-MULTI-MACHINE (cross-HOST networking):** the WIRE is now PROVEN two-process-on-one-
+  machine over a real socket — a separate authenticated `ws` endpoint (bound 127.0.0.1 only; off-loopback
+  throws), the join handshake (token → explicit admit), per-frame revoke, and the full round-trip
+  (pack → push → quarantine → host-git re-derive) against a real peer-agent. What stays DEFERRED is real
+  *networking between machines*: NAT/tunnel (cloudflared/ngrok), latency, a genuinely remote peer, and the
+  off-loopback bind. Two further collab items stay deferred and must NOT be read into "the wire is proven":
+  a peer GENUINELY bubblewrap-jailing a task over the wire (the Wire D happy-path used a test SEAM, not a
+  real jail — run it in WSL for the real thing), and a REAL provider executing a peer's task over the wire
+  with real tokens (the wire tests use `--mock`). *First things to run when a second machine is available.*
 - **DEFERRED (no target needed):** the per-domain network-allowlist filtering proxy — `network:none` is
   the only jail-enforceable posture, so a `network:allowlist` policy stays Claude-pinned even sandboxed.
 
@@ -463,7 +470,7 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§6** — `phase` is load-bearing: a bootstrapping scratch project runs the greenfield workflow (phase-driven intake); `done` flips bootstrapping→maintenance, bound to reconcile's done-path; the scaffold BORNS the baseline so ticket #2 gets differential gating back (#27).
 - **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23); greenfield gating is ABSOLUTE (gate commands read from the worktree; integration-sweep is the MVP-exists gate with teeth); the MVP never auto-lands on `main` (#27). The `--live` greenfield smoke is DEFERRED-PENDING-BUDGET (above).
 - **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
-- **§11** — collab is a THREE-legged threat model (#29): executor-sandbox / host-gates+quarantine+differ-by-vendor / one-way data-confidentiality (minimize+inform, residual accepted); token + explicit human admit + revoke; creds never cross. The real cross-machine wire is DEFERRED-PENDING-MULTI-MACHINE (above).
+- **§11** — collab is a THREE-legged threat model (#29): executor-sandbox / host-gates+quarantine+differ-by-vendor / one-way data-confidentiality (minimize+inform, residual accepted); token + explicit human admit + revoke; creds never cross. The WIRE (separate authenticated `ws` endpoint, bound 127.0.0.1-only/off-loopback-throws; join→admit→revoke; pack→push→quarantine→host-git re-derive) is PROVEN two-process-on-one-machine over a real socket; cross-HOST networking + a peer genuinely jailing over the wire + a real provider over the wire stay DEFERRED-PENDING-MULTI-MACHINE (above).
 - **§14** — the OS sandbox is the 4th, outermost defense-in-depth layer making pathScope+network:none REAL; "verified" = a real escape was DENIED (self-test, host-readback), never "binary present"; local = sandbox-when-available, collab = sandbox-REQUIRED fail-closed (#28). Linux (bubblewrap) real confinement is **VERIFIED-ON-LINUX** (2026-06-30: fs denied by host-readback, net by `ENETUNREACH` under `--unshare-net`); macOS stays DEFERRED-PENDING-MACOS; per-domain network-allowlist deferred (only network:none is jail-enforceable).
 - **§15** — OS sandboxing gates Phase 5 (ships with collab), not Phase 6.
 - **CLAUDE.md** — gate toolchain pinned (Vitest/ESLint/tsc/Prettier) + aggregate `gate` + pre-commit hook (#16); migrate full schema up front, repositories only for tables a phase uses (#19).
