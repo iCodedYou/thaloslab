@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Thalos Lab",
+  "version": "0.0.0",
+  "identifier": "lab.thalos.shell",
+  "build": {
+    "frontendDist": "http://127.0.0.1:8473"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Thalos Lab",
+        "url": "http://127.0.0.1:8473",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src http://127.0.0.1:8473 ws://127.0.0.1:8473; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'",
+      "dangerousRemoteDomainIpcAccess": [],
+      "assetProtocol": {
+        "enable": false
+      },
+      "freezePrototype": true
+    },
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/thaloslab"]
+  },
+  "plugins": {}
+}

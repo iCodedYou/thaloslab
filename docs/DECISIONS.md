@@ -318,6 +318,39 @@ while active+consented; **one-time token + EXPLICIT human admit** (a valid token
 + revoke; creds NEVER cross — the invoke carries the neutral `ToolPolicy` + a context ref, never API
 keys. *Refines SPEC §11 + §14.*
 
+### 30. Tauri desktop shell + observability — wrap, don't widen (Phase 6)
+
+Phase 6 is packaging + instrumentation over the complete engine; the bar is **add no trust surface**.
+
+**Desktop shell — a thin window that navigates to the daemon, never re-exposes it.** The shell loads
+`http://127.0.0.1:8473` (the daemon-served SPA) in a webview — the **same origin** as `/api` + `/ws`,
+so the daemon needs **no CORS** and its "no external origin is ever admitted" posture holds *by
+construction*. The alternative — bundling the SPA as `tauri://` assets — is **rejected**: it makes
+every `/api` call cross-origin and forces `@fastify/cors` onto the zero-auth localhost server (a new
+externally-shaped surface). The daemon is started by **exec-ing the proven `thaloslab --no-open`
+launcher** (the reuse-or-spawn lifecycle stays in the CLI; the shell replicates **zero** lifecycle
+logic — the "second daemon" bug lives only in a reimplementation, and the daemon's PID-idempotency
+backstop is the final guard). The bind host is never passed from the shell — it stays hardcoded
+`127.0.0.1`; a LAN/`0.0.0.0` bind remains a code + collab-admit security change, never a packaging
+default. The config is locked down (`withGlobalTauri:false`, `dangerousRemoteDomainIpcAccess:[]`, CSP
+`connect-src` loopback-only, asset protocol off, `shell` capability scoped to the one sidecar binary,
+no `shell:allow-open`) and **mechanically asserted by a config-lint test that parses the actual JSON**.
+The collab explicit-admit step is unchanged (the Collab tab calls the same admit endpoint). The native
+`tauri build` is **DEFERRED-PENDING-TOOLCHAIN** (no Rust on the build box) — two claims kept distinct:
+the config + lint prove the trust-**preservation intent**; only a real build + runtime smoke on a Rust
+box proves the **packaged app behaves**.
+
+**Observability — metadata only, read-and-aggregate, no new sink.** A read-only telemetry API
+(`GET /api/observability/:projectId`, `/api/tickets/:id/telemetry`) + an Insights tab surface token/
+cost/timing/run-status/escalation rollups per provider and per collab peer. It adds **no new persisted
+data**, so it cannot become a new exfiltration surface. Two safe-access rules, enforced structurally:
+`runs` is read via a hand-written safe-column projection (never `toRun()`/`SELECT *`, which carry
+`prompt`+`output`); `task_events` is **count-by-type only** (its `payloadJson` holds the raw
+`agent.output` stdout chunk — a second secret-bearing vector — so it is never projected). The leak test
+plants secrets in **both** vectors and proves they are absent from every endpoint **and** from the repo
+projection itself (so a leaky `SELECT` fails even though the numeric rollup would otherwise aggregate it
+away). *Refines SPEC §4 / §13 / §15.*
+
 ---
 
 ## Deferred / open items (named, not silently skipped)
@@ -331,6 +364,7 @@ keys. *Refines SPEC §11 + §14.*
 | `DEFERRED-PENDING-LINUX` | real bubblewrap confinement (Phase 5) | the self-test's real escape probe, DENIED by a real jail on a Linux box |
 | `DEFERRED-PENDING-MACOS` | sandbox-exec/Lima (not yet implemented) (Phase 5) | the same self-test on macOS |
 | `DEFERRED-PENDING-MULTI-MACHINE` | the real cross-machine collab wire (Phase 5) | a real remote peer over the tunnel (the mock proved the trust logic, not the wire) |
+| `DEFERRED-PENDING-TOOLCHAIN` | the native Tauri `tauri build` + packaged-app runtime smoke (Phase 6) | on a Rust box: build the shell, confirm the window truly loads `127.0.0.1:8473`, the CSP is enforced by the webview, and the sidecar truly reuses the daemon (the config-lint proves the locked-down intent, not the running app) |
 | `DEFERRED` (no target) | the per-domain network-allowlist filtering proxy (Phase 5) | n/a — only `network:none` is jail-enforceable, so `network:allowlist` stays Claude-pinned |
 
 Until each is run-and-passed on real hardware, its subject stays at the safe posture already in place

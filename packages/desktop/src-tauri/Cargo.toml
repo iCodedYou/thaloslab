@@ -1,0 +1,22 @@
+# Thalos Lab desktop shell — Tauri v2 manifest (SPEC §15, Phase 6).
+# The native build is DEFERRED-PENDING-TOOLCHAIN (no Rust/cargo on the authoring box). This manifest
+# + tauri.conf.json + capabilities/default.json are the reviewable, locked-down security artifact.
+[package]
+name = "thalos-lab-desktop"
+version = "0.0.0"
+description = "Thin native window over the loopback Thalos Lab daemon UI"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# The ONLY plugin: shell, used solely to exec the bundled thaloslab launcher sidecar (scoped in
+# capabilities/default.json to that one binary). No fs / http / dialog / updater plugins.
+tauri-plugin-shell = "2"
+
+[features]
+# By default Tauri ships with the custom-protocol feature for production bundles.
+custom-protocol = ["tauri/custom-protocol"]

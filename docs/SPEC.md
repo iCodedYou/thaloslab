@@ -182,6 +182,8 @@ End-to-end TypeScript. Rationale: one language across daemon and UI; Node has th
 
 **Not Electron/Tauri.** The concept specifies "opens Main Page in browser," so the daemon serves a localhost UI and there is no desktop shell to build or ship. A packaged Tauri desktop app is a deferred option ([§16](#16-decisions)) if a single-window native experience is wanted later.
 
+> **Resolved (Phase 6, DECISIONS #30):** the optional Tauri shell is authored as a **thin window that navigates to `http://127.0.0.1:8473`** — the daemon-served SPA, **same-origin** with `/api` + `/ws`, so it needs **no CORS** and widens no trust surface. The SPA is **not** bundled as `tauri://` assets (that would force CORS); the daemon is started by exec-ing the proven `thaloslab --no-open` launcher (the shell replicates **zero** lifecycle logic); the bind host stays hardcoded `127.0.0.1`. The locked-down `tauri.conf.json` + capabilities are mechanically asserted by a config-lint test. The native `tauri build` is **DEFERRED-PENDING-TOOLCHAIN** (no Rust on the build box).
+
 **Backend alternative considered:** a Python daemon (rich agent-orchestration libraries). Rejected for this app because the subprocess/WS/CLI-distribution advantages of Node dominate, and the value is in orchestration logic we are writing ourselves rather than in an agent framework. Revisit only if the team is decisively more productive in Python.
 
 ---
@@ -837,14 +839,17 @@ The app runs AI agents that execute code on the user's machine, so safety is fir
 
 Built using the very methodology the app implements: phased, verification-anchored, blast-radius-scaled, each phase a shippable vertical slice. Earlier phases de-risk the core; collab (highest-trust-risk) is last.
 
-> **Status (build): Phases 0–5 COMPLETE** — built, gated green, and banked. Each was proven
-> deterministically (`pnpm gate`) plus, where applicable, a real `--live` smoke; what could not be
-> verified on the build machine is **named and deferred behind an on-target pre-trust gate**, never
-> silently claimed (see [DECISIONS](DECISIONS.md) "Deferred / open items" for the single consolidated
-> list: `DEFERRED-PENDING-INSTALL` (Codex/Gemini), `DEFERRED-PENDING-BUDGET` (the `--live` greenfield
-> smoke), `DEFERRED-PENDING-LINUX` / `DEFERRED-PENDING-MACOS` (real sandbox confinement),
-> `DEFERRED-PENDING-MULTI-MACHINE` (the real collab wire), and the per-domain network-allowlist proxy).
-> **Phase 6 (hardening) is the only remaining roadmap item.**
+> **Status (build): Phases 0–6 built and logic-proven\*** — built, gated green, and banked. Each was
+> proven deterministically (`pnpm gate`) plus, where applicable, a real `--live` smoke. **\*The
+> asterisk is load-bearing:** what could not be verified on the build machine is **named and deferred
+> behind an on-target pre-trust gate**, never silently claimed "done" (see [DECISIONS](DECISIONS.md)
+> "Deferred / open items" for the single consolidated list — now **seven** items: the six prior
+> (`DEFERRED-PENDING-INSTALL` Codex/Gemini; `DEFERRED-PENDING-BUDGET` the `--live` greenfield smoke;
+> `DEFERRED-PENDING-LINUX` / `DEFERRED-PENDING-MACOS` real sandbox confinement;
+> `DEFERRED-PENDING-MULTI-MACHINE` the real collab wire; the per-domain network-allowlist proxy) **plus
+> `DEFERRED-PENDING-TOOLCHAIN`** — the native Tauri `tauri build` + packaged-app runtime smoke on a Rust
+> box. **Phase 6 ADDS a deferred item; it clears none.** The full SPEC §15 roadmap is now built and
+> logic-proven, with every on-hardware gate still standing.
 
 **Phase 0 — Scaffolding.** Monorepo + workspaces; `thaloslab` bin with the menu and flags; daemon (Fastify + ws) with health; React+Vite UI shell with the left-rail layout and design tokens; SQLite + migrations; provider detection for **Claude only**; project create (new local + GitHub repo) and import (clone); `.thalos/` layout. *Outcome:* `thaloslab` launches, opens the UI, lists a project, detects Claude.
 
@@ -858,7 +863,7 @@ Built using the very methodology the app implements: phased, verification-anchor
 
 **Phase 5 — Collab mode (with OS sandboxing).** OS-level sandboxing of agent subprocesses (a prerequisite for this phase — see §14); pooling; peer provider-agent; LAN + tunnel (cloudflared/ngrok) connection; the WebSocket RPC protocol; the trust/consent/scoping model; cost attribution; the collab tab. *Outcome:* multiple people pool agents into one project, executing under sandbox isolation.
 
-**Phase 6 — Hardening (later).** Optional packaged Tauri desktop app; polish, error handling, observability of the orchestration itself.
+**Phase 6 — Hardening.** Optional Tauri desktop shell (a thin window navigating to the same `127.0.0.1:8473` UI — same-origin, no CORS, lifecycle reused via the `thaloslab` launcher, config-lint-asserted; native `tauri build` DEFERRED-PENDING-TOOLCHAIN) + orchestration observability (read-only, metadata-only telemetry rollups + an Insights tab, leak-tested to never surface prompt/output). *Outcome:* a packaged single-window option and visibility into the engine's own cost/timing/run-status — neither widening the daemon's trust boundary. *(See DECISIONS #30; the status note above for what's logic-proven here vs deferred on-hardware.)*
 
 ---
 

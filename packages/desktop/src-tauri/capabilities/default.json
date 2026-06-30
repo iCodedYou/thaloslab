@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Thin native window over the loopback daemon UI. The ONLY privilege is executing the bundled thaloslab launcher sidecar (which reuses-or-starts the 127.0.0.1 daemon). No shell.open, no fs, no http, no unscoped exec — the window needs no privileged Tauri API at runtime.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/thaloslab",
+          "sidecar": true,
+          "args": ["--no-open"]
+        }
+      ]
+    }
+  ]
+}
