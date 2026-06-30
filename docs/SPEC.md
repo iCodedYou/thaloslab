@@ -366,7 +366,8 @@ When a from-scratch MVP build completes, the project transitions Bootstrapping �
 > combined tree = "MVP exists"); `impl-green` is compile-level. The transition flips **only on terminal
 > `done`** (crash-safe, idempotent; DB authoritative, `config.json` mirrored). The MVP **never
 > auto-lands on `main`** — that stays a separate human-authorized land (no greenfield exception). The
-> real `--live` greenfield smoke is **DEFERRED-PENDING-BUDGET** (DECISIONS "Deferred / open items").
+> real `--live` greenfield smoke is **VERIFIED-BUDGET** (2026-06-30 — one capped run reached `done` in
+> 5 invokes/81.4k tok/2.6min/2 path-disjoint lanes, buildable MVP; DECISIONS "Deferred / open items").
 
 ### Defaults are versioned with the project
 
@@ -848,14 +849,16 @@ Built using the very methodology the app implements: phased, verification-anchor
 > proven deterministically (`pnpm gate`) plus, where applicable, a real `--live` smoke. **\*The
 > asterisk is load-bearing:** what could not be verified on the build machine is **named and deferred
 > behind an on-target pre-trust gate**, never silently claimed "done" (see [DECISIONS](DECISIONS.md)
-> "Deferred / open items" for the single consolidated list). **One gate has now CLEARED on real
-> hardware: `DEFERRED-PENDING-LINUX` → `VERIFIED-ON-LINUX` (2026-06-30)** — the real bubblewrap jail
-> genuinely confined on a real kernel (fs + net escapes DENIED ⇒ `selfTest().ok=true`; the relaxation
-> un-pinned Codex). **Six deferred items remain:** `DEFERRED-PENDING-INSTALL` (Codex/Gemini),
-> `DEFERRED-PENDING-BUDGET` (the `--live` greenfield smoke), `DEFERRED-PENDING-MACOS` (macOS sandbox-exec),
-> `DEFERRED-PENDING-MULTI-MACHINE` (the real collab wire), `DEFERRED-PENDING-TOOLCHAIN` (the native Tauri
-> build), and the per-domain network-allowlist proxy. The full SPEC §15 roadmap is built and logic-proven,
-> the Linux sandbox is hardware-verified, and the remaining gates still stand.
+> "Deferred / open items" for the single consolidated list). **Two gates have now CLEARED:**
+> `DEFERRED-PENDING-LINUX` → `VERIFIED-ON-LINUX` (2026-06-30 — the real bubblewrap jail genuinely confined
+> on a real kernel; the relaxation un-pinned Codex) and `DEFERRED-PENDING-BUDGET` → `VERIFIED-BUDGET`
+> (2026-06-30 — one capped `--live` greenfield run produced a buildable MVP + 2 path-disjoint parallel lanes
+> in 5 invokes/81.4k tok/2.6min). The **collab WIRE** is also now PROVEN two-process-on-one-machine over a
+> real socket (Wire A–D). **Deferred items remaining:** `DEFERRED-PENDING-INSTALL` (Codex/Gemini),
+> `DEFERRED-PENDING-MACOS` (macOS sandbox-exec), `DEFERRED-PENDING-MULTI-MACHINE` (cross-HOST collab
+> networking + a peer jailing over the wire + a real provider over the wire), `DEFERRED-PENDING-TOOLCHAIN`
+> (the native Tauri build), and the per-domain network-allowlist proxy. The full SPEC §15 roadmap is built
+> and logic-proven; two gates are now verified on real hardware/tokens; the rest still stand.
 
 **Phase 0 — Scaffolding.** Monorepo + workspaces; `thaloslab` bin with the menu and flags; daemon (Fastify + ws) with health; React+Vite UI shell with the left-rail layout and design tokens; SQLite + migrations; provider detection for **Claude only**; project create (new local + GitHub repo) and import (clone); `.thalos/` layout. *Outcome:* `thaloslab` launches, opens the UI, lists a project, detects Claude.
 

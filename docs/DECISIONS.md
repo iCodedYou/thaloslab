@@ -360,7 +360,7 @@ away). *Refines SPEC §4 / §13 / §15.*
 | Tag | What | Pre-trust gate that runs before it's trusted |
 |---|---|---|
 | `DEFERRED-PENDING-INSTALL` | Codex/Gemini real `enforce()` mapping + stream-parser conformance (Phase 3) | run the real CLI: verify `unmet`-set vs `--help`, re-capture the stream fixtures |
-| `DEFERRED-PENDING-BUDGET` | the `--live` greenfield smoke (Phase 4) | a manual capped build on real `pnpm` (≤2 lanes/300k tok/$5/15min/12 invokes; first cap ABORTS) |
+| ✅ `VERIFIED-BUDGET` (2026-06-30) | the `--live` greenfield smoke (Phase 4) — **RAN, one real spec** | DONE: a capped `--live` run (real Claude, `scripts/smoke-greenfield.ts`) on a small spec (`wc-lite`, a minimal `wc`) reached `done` in **5 invokes / 81.4k tokens / 2.6 min / 2 lanes** — well under every cap (12/300k/15min/2). The architect invented structure and decomposed into **2 genuinely PATH-disjoint lanes** (`src/count.js` vs `bin/wc-lite.js`+`package.json`) that ran as parallel seam worktrees — NOT collapsed to one. The MVP is BUILDABLE: `printf 'hello world\n' \| node bin/wc-lite.js` → `1 2 12` (acceptance met); `main` was never touched; integration-sweep gated `done`. Nuance (real-world messiness, MVP still correct): the CLI lane **inlined** its own counting logic instead of importing the lane-0 contract, and the scaffold left orphan stubs (`count.js`/`cli.js`) — so path-disjoint held, but logic-DRY did not. **One run, not a guarantee every greenfield holds.** |
 | ✅ `VERIFIED-ON-LINUX` (2026-06-30) | real bubblewrap confinement (Phase 5) — **VERIFIED** | DONE: the real self-test's escape probe was genuinely DENIED on kernel `6.18.33.2-microsoft-standard-WSL2` + bubblewrap 0.11.1 — fs by host-readback, net by `ENETUNREACH` under `--unshare-net` ⇒ `selfTest().ok=true`; the router relaxation then un-pinned a Codex builder, while Noop re-pinned to Claude. See "Phase 5 sandbox — VERIFIED-ON-LINUX" below |
 | `DEFERRED-PENDING-MACOS` | sandbox-exec/Lima (not yet implemented) (Phase 5) | the same self-test on macOS |
 | `DEFERRED-PENDING-MULTI-MACHINE` | **cross-HOST** collab networking — NAT/tunnel (cloudflared/ngrok)/latency/a genuinely remote peer + the off-loopback bind (Phase 5). The WIRE itself (transport + protocol + trust state machine) is now PROVEN two-process-on-one-machine over a real socket; what remains is real *networking* between machines | a real second machine joins over the tunnel and runs the collab suite; the off-loopback bind opt-in implemented + reviewed |
@@ -429,12 +429,22 @@ single token spend in the project (a full MVP from nothing). The deterministic `
 **standing proof** (the full run → done → flip, the *born baseline* via ticket #2, the
 integration-sweep *teeth*, the absorbing partial-failure path). The **real `--live` greenfield smoke**
 — a manual, opt-in, never-in-CI build of a deliberately tiny MVP that exercises discovery →
-spec-gate → architect-invents-structure → multi-lane build on real `pnpm` — is **deferred pending an
-explicit budget opt-in**, under a hard cap decided in advance: **≤ 2 seams/lanes, ≤ 300k output tokens
-(≈ $5), ≤ 15 min, ≤ 12 agent invocations**; the **first cap hit ABORTS** the run (never runs away).
-It validates the `detectGateCommands`-from-worktree path against a real package manager — the only
-thing the mock bar can't. Until run, Phase 4 is *mechanically complete + deterministically proven,
-real-agent-greenfield-unverified*.
+spec-gate → architect-invents-structure → multi-lane build on real `pnpm` — ran under a hard cap
+decided in advance: **≤ 2 seams/lanes, ≤ 300k output tokens (≈ $5), ≤ 15 min, ≤ 12 agent invocations**;
+**first cap hit ABORTS** (`scripts/smoke-greenfield.ts`, a verification harness — the greenfield engine
+is untouched).
+
+**✅ VERIFIED-BUDGET (2026-06-30).** One capped `--live` run on a small spec (`wc-lite`) reached `done`
+in **5 invokes / 81.4k tokens / 2.6 min / 2 lanes** — comfortably inside every cap (the caps were
+generous for a small greenfield, not tight). What it taught (the point of the run): (1) the architect
+produced a **BUILDABLE** MVP — `printf 'hello world\n' | node bin/wc-lite.js` → `1 2 12`, acceptance met,
+`main` untouched; (2) it decomposed into **2 genuinely PATH-disjoint lanes** that ran as parallel seam
+worktrees — it did NOT collapse to one (the Phase 2 question gets a *positive* answer for path-disjointness
+on an invented structure); (3) **integration-sweep behaved as the MVP-exists gate** — `done` requires it
+green, and the real acceptance passing confirms it gated under real tokens; (4) **real-world messiness, MVP
+still correct**: the CLI lane inlined its own counting logic instead of importing the lane-0 contract, and
+the scaffold left orphan stubs — path-disjoint held, logic-DRY did not. **This is ONE run on ONE small
+spec — it proves the greenfield flow works under real tokens, not that every greenfield holds.**
 
 
 
@@ -468,7 +478,7 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§11** — default collab sharing scope = brief + worktree + interface context pack, secrets stripped.
 - **§5** — the engine speaks a neutral `ToolPolicy`; adapters' `enforce()→{args,unmet}` translate it (#25); the constraint-aware router picks the provider fail-closed, reviewer-must-differ / auditor-prefers, nothing-eligible → PARK (#26). Codex/Gemini are live-unverified (DEFERRED-PENDING-INSTALL above).
 - **§6** — `phase` is load-bearing: a bootstrapping scratch project runs the greenfield workflow (phase-driven intake); `done` flips bootstrapping→maintenance, bound to reconcile's done-path; the scaffold BORNS the baseline so ticket #2 gets differential gating back (#27).
-- **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23); greenfield gating is ABSOLUTE (gate commands read from the worktree; integration-sweep is the MVP-exists gate with teeth); the MVP never auto-lands on `main` (#27). The `--live` greenfield smoke is DEFERRED-PENDING-BUDGET (above).
+- **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23); greenfield gating is ABSOLUTE (gate commands read from the worktree; integration-sweep is the MVP-exists gate with teeth); the MVP never auto-lands on `main` (#27). The `--live` greenfield smoke is **VERIFIED-BUDGET** (above — one capped run: a real architect invented a buildable MVP + 2 path-disjoint parallel lanes under the caps).
 - **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
 - **§11** — collab is a THREE-legged threat model (#29): executor-sandbox / host-gates+quarantine+differ-by-vendor / one-way data-confidentiality (minimize+inform, residual accepted); token + explicit human admit + revoke; creds never cross. The WIRE (separate authenticated `ws` endpoint, bound 127.0.0.1-only/off-loopback-throws; join→admit→revoke; pack→push→quarantine→host-git re-derive) is PROVEN two-process-on-one-machine over a real socket; cross-HOST networking + a peer genuinely jailing over the wire + a real provider over the wire stay DEFERRED-PENDING-MULTI-MACHINE (above).
 - **§14** — the OS sandbox is the 4th, outermost defense-in-depth layer making pathScope+network:none REAL; "verified" = a real escape was DENIED (self-test, host-readback), never "binary present"; local = sandbox-when-available, collab = sandbox-REQUIRED fail-closed (#28). Linux (bubblewrap) real confinement is **VERIFIED-ON-LINUX** (2026-06-30: fs denied by host-readback, net by `ENETUNREACH` under `--unshare-net`); macOS stays DEFERRED-PENDING-MACOS; per-domain network-allowlist deferred (only network:none is jail-enforceable).
