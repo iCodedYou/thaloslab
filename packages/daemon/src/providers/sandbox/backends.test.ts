@@ -6,6 +6,7 @@
 // gated by the same self-test running for real on-target before trust.
 import type { Sandbox, ToolPolicy } from '@thaloslab/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { whichSync } from '../which';
 import { bubblewrapSandbox } from './bubblewrap';
 import { noopSandbox } from './noop';
 import {
@@ -86,6 +87,25 @@ describe('this build machine — honest per-OS state', () => {
     }
   });
 });
+
+// VERIFIED-ON-LINUX: the permanent, re-runnable form of the DEFERRED-PENDING-LINUX verification. On a
+// real Linux kernel with bwrap present, the REAL self-test must PASS — a genuine escape DENIAL, not a
+// reported one (fs by host-readback, net by a no-route error under --unshare-net). First run green on
+// kernel 6.18.x WSL2 + bubblewrap 0.11.1 (see DECISIONS "Deferred / open items"). Skips off-Linux /
+// without bwrap, so the Windows gate is unaffected; on Linux CI it is a standing regression guard.
+const bwrapReal = process.platform === 'linux' && Boolean(whichSync('bwrap'));
+
+describe.runIf(bwrapReal)(
+  'REAL bubblewrap confinement (Linux + bwrap only) — genuine denial',
+  () => {
+    it('the real jail DENIES the escape probe → selfTest ok:true, fsBlocked, netBlocked', async () => {
+      const r = await bubblewrapSandbox.selfTest();
+      expect(r.fsBlocked).toBe(true); // the probe's write never reached the host (host-readback)
+      expect(r.netBlocked).toBe(true); // network:none → no route to a routable address
+      expect(r.ok).toBe(true);
+    }, 30_000);
+  },
+);
 
 describe('bubblewrap command construction (the jail FLAGS — not a confinement proof)', () => {
   it('builds a read-only host bind + writable rw set + unshared net for network:none', () => {

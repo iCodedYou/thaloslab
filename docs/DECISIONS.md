@@ -361,7 +361,7 @@ away). *Refines SPEC §4 / §13 / §15.*
 |---|---|---|
 | `DEFERRED-PENDING-INSTALL` | Codex/Gemini real `enforce()` mapping + stream-parser conformance (Phase 3) | run the real CLI: verify `unmet`-set vs `--help`, re-capture the stream fixtures |
 | `DEFERRED-PENDING-BUDGET` | the `--live` greenfield smoke (Phase 4) | a manual capped build on real `pnpm` (≤2 lanes/300k tok/$5/15min/12 invokes; first cap ABORTS) |
-| `DEFERRED-PENDING-LINUX` | real bubblewrap confinement (Phase 5) | the self-test's real escape probe, DENIED by a real jail on a Linux box |
+| ✅ `VERIFIED-ON-LINUX` (2026-06-30) | real bubblewrap confinement (Phase 5) — **VERIFIED** | DONE: the real self-test's escape probe was genuinely DENIED on kernel `6.18.33.2-microsoft-standard-WSL2` + bubblewrap 0.11.1 — fs by host-readback, net by `ENETUNREACH` under `--unshare-net` ⇒ `selfTest().ok=true`; the router relaxation then un-pinned a Codex builder, while Noop re-pinned to Claude. See "Phase 5 sandbox — VERIFIED-ON-LINUX" below |
 | `DEFERRED-PENDING-MACOS` | sandbox-exec/Lima (not yet implemented) (Phase 5) | the same self-test on macOS |
 | `DEFERRED-PENDING-MULTI-MACHINE` | the real cross-machine collab wire (Phase 5) | a real remote peer over the tunnel (the mock proved the trust logic, not the wire) |
 | `DEFERRED-PENDING-TOOLCHAIN` | the native Tauri `tauri build` + packaged-app runtime smoke (Phase 6) | on a Rust box: build the shell, confirm the window truly loads `127.0.0.1:8473`, the CSP is enforced by the webview, and the sidecar truly reuses the daemon (the config-lint proves the locked-down intent, not the running app) |
@@ -369,27 +369,47 @@ away). *Refines SPEC §4 / §13 / §15.*
 
 Until each is run-and-passed on real hardware, its subject stays at the safe posture already in place
 (an unverified jail = NoopSandbox-equivalent → no router relaxation, collab fail-closed; an unverified
-provider mapping = the mock's assumption, not a proof). Nothing below is overclaimed.
+provider mapping = the mock's assumption, not a proof). Nothing below is overclaimed. **One item has now
+cleared its gate: `DEFERRED-PENDING-LINUX` → `VERIFIED-ON-LINUX` (2026-06-30)** — the real bubblewrap
+jail genuinely confined on a real kernel (details below).
 
-### Phase 5 — sandbox + collab (the value of this phase is that its gaps are NAMED)
+**Verification surfaced (and fixed) one real defect, the kind only a real kernel reveals:** the net
+self-test originally probed `127.0.0.1` — but every network namespace has its OWN loopback (present even
+under `--unshare-net`), so a loopback probe could not distinguish an isolated namespace from the host
+(it returned `ECONNREFUSED` either way ⇒ false `connectedOut`). Direct diagnosis confirmed the jail
+*does* isolate (external `1.1.1.1:53` → `CONNECTED` with net inherited, → `ENETUNREACH` under
+`--unshare-net`); the probe was just measuring the wrong address. Fix (design-preserving, same two-axis
+verdict): probe TEST-NET-1 `192.0.2.1` (RFC 5737 — no real host is contacted) and treat only no-route
+codes (`ENETUNREACH`/`EHOSTUNREACH`/`ENETDOWN`/`EADDRNOTAVAIL`) as blocked; everything else (incl.
+timeout/unknown) is reachable → fail-closed. Re-run ⇒ `ok=true`.
+
+### Phase 5 — sandbox + collab (the value of this phase is that its gaps are NAMED — and now closing)
 
 The trust LOGIC is proven on the Windows build machine (self-test decision logic, router relaxation,
-the three collab axes via an in-process mock peer). REAL confinement and the REAL wire are deferred
-behind self-tests/mocks that run **for real on-target before trust** — exactly like Phase 3's
-deferred-pending-install. A reader must not mistake a deferred jail for a verified one.
+the three collab axes via an in-process mock peer). The Linux jail's **REAL confinement is now VERIFIED**
+(2026-06-30, above); macOS confinement and the REAL cross-machine wire remain deferred behind
+self-tests/mocks that run **for real on-target before trust** — exactly like Phase 3's
+deferred-pending-install. A reader must not mistake a *deferred* jail for a verified one — and the Linux
+one is no longer deferred.
 
 **Cross-platform sandbox — what is verified vs deferred:**
 
-| OS | Backend | Verified on hardware here? | Status |
+| OS | Backend | Verified on hardware? | Status |
 |---|---|---|---|
-| Linux | bubblewrap (rootless userns) — **implemented** | **No** (no Linux/WSL on the build box) | **DEFERRED-PENDING-LINUX** |
+| Linux | bubblewrap (rootless userns) — **implemented** | **YES** — kernel 6.18.x WSL2 + bwrap 0.11.1 (2026-06-30) | ✅ **VERIFIED-ON-LINUX** |
 | macOS | sandbox-exec / Lima — not yet implemented | No | **DEFERRED-PENDING-MACOS** |
 | Windows (this box) | WSL2 / Docker — neither present → **NoopSandbox** | n/a (no real jail) | local unsandboxed (DiD floor), collab fail-closed |
 
-- **DEFERRED-PENDING-LINUX / -MACOS:** the bubblewrap (and a future sandbox-exec) jail's REAL confinement.
-  The self-test runs the real escape probe on-target and trusts the jail ONLY if the probe is denied.
-  *First thing to run when a Linux/macOS box is available.* Until then: present-but-unverified ⇒ treated
-  as Noop (no relaxation, collab fail-closed).
+- **VERIFIED-ON-LINUX (2026-06-30):** the real bubblewrap jail's confinement was proven on a real Linux
+  kernel (WSL2 6.18.x, bubblewrap 0.11.1, unprivileged userns available — `bwrap --ro-bind / / --unshare-all
+  true` → exit 0). The real self-test genuinely DENIED both escapes — fs by host-readback (the probe's
+  token never reached the host file), net by `ENETUNREACH` under `--unshare-net` — ⇒ `selfTest().ok=true`,
+  and the router relaxation then un-pinned a Codex builder (Noop re-pinned to Claude). A permanent guarded
+  test (`backends.test.ts`, `describe.runIf(linux+bwrap)`) re-runs this on any Linux box; it skips off-Linux
+  so the Windows gate is unaffected. The exact jail flags: `bwrap --die-with-parent --new-session --unshare-{user,pid,ipc,uts}
+  --ro-bind / / --tmpfs /tmp --proc /proc --dev /dev --bind <rw> <rw> --unshare-net`.
+- **DEFERRED-PENDING-MACOS:** the future sandbox-exec/Lima jail's REAL confinement — the same self-test on
+  macOS. Until then: present-but-unverified ⇒ treated as Noop (no relaxation, collab fail-closed).
 - **DEFERRED-PENDING-MULTI-MACHINE:** the real cross-machine collab wire (the Fastify collab endpoint +
   tunnel + a real remote peer). The in-process mock peer proves the trust/strip/quarantine LOGIC; it does
   NOT prove a real remote peer over a real wire behaves. *First thing to run when a second machine is
@@ -444,6 +464,6 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23); greenfield gating is ABSOLUTE (gate commands read from the worktree; integration-sweep is the MVP-exists gate with teeth); the MVP never auto-lands on `main` (#27). The `--live` greenfield smoke is DEFERRED-PENDING-BUDGET (above).
 - **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
 - **§11** — collab is a THREE-legged threat model (#29): executor-sandbox / host-gates+quarantine+differ-by-vendor / one-way data-confidentiality (minimize+inform, residual accepted); token + explicit human admit + revoke; creds never cross. The real cross-machine wire is DEFERRED-PENDING-MULTI-MACHINE (above).
-- **§14** — the OS sandbox is the 4th, outermost defense-in-depth layer making pathScope+network:none REAL; "verified" = a real escape was DENIED (self-test, host-readback), never "binary present"; local = sandbox-when-available, collab = sandbox-REQUIRED fail-closed (#28). Real confinement is DEFERRED-PENDING-LINUX/MACOS; per-domain network-allowlist deferred (only network:none is jail-enforceable).
+- **§14** — the OS sandbox is the 4th, outermost defense-in-depth layer making pathScope+network:none REAL; "verified" = a real escape was DENIED (self-test, host-readback), never "binary present"; local = sandbox-when-available, collab = sandbox-REQUIRED fail-closed (#28). Linux (bubblewrap) real confinement is **VERIFIED-ON-LINUX** (2026-06-30: fs denied by host-readback, net by `ENETUNREACH` under `--unshare-net`); macOS stays DEFERRED-PENDING-MACOS; per-domain network-allowlist deferred (only network:none is jail-enforceable).
 - **§15** — OS sandboxing gates Phase 5 (ships with collab), not Phase 6.
 - **CLAUDE.md** — gate toolchain pinned (Vitest/ESLint/tsc/Prettier) + aggregate `gate` + pre-commit hook (#16); migrate full schema up front, repositories only for tables a phase uses (#19).

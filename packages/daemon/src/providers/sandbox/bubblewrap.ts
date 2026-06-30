@@ -3,11 +3,12 @@
 // namespace. A probe that writes outside the rw set lands on the ro host fs (EROFS) or the throwaway
 // tmpfs — never the host file (proven by the self-test's host-readback).
 //
-// ⚠️ CONFINEMENT-UNVERIFIED ON THE BUILD MACHINE (DEFERRED-PENDING-LINUX): this Windows box has no
-// Linux/WSL, so the self-test below could not be run against a REAL bwrap jail here. Trust flows ONLY
-// from `selfTest().ok` — which runs the real escape probe on-target and is true only if the probe was
-// genuinely DENIED. A bwrap that is present but misconfigured fails its self-test and is treated
-// exactly like NoopSandbox (present-but-not-trusted → no relaxation, fail-closed for collab).
+// ✅ CONFINEMENT VERIFIED-ON-LINUX: the self-test below was run against a REAL bwrap jail on kernel
+// 6.18.x WSL2 + bubblewrap 0.11.1 and genuinely DENIED both escapes (fs write blocked by host-readback;
+// network:none → ENETUNREACH under --unshare-net) ⇒ selfTest().ok=true. Trust still flows ONLY from
+// `selfTest().ok` — the real escape probe on-target, true only if the probe was genuinely DENIED. A
+// bwrap that is present but misconfigured fails its self-test and is treated exactly like NoopSandbox
+// (present-but-not-trusted → no relaxation, fail-closed for collab). macOS = DEFERRED-PENDING-MACOS.
 import type { Sandbox, SandboxScope, SelfTestResult } from '@thaloslab/shared';
 import { execa } from 'execa';
 import { whichSync } from '../which';

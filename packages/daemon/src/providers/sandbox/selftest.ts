@@ -10,7 +10,9 @@
 // On the Windows build box there is no real jail, so a real probe ESCAPES (writes outside, reaches the
 // stack) and the verdict is correctly ok:false → fail-closed. That is not a limitation: it is the
 // system refusing to trust a non-confining environment. Real confinement (probe blocked ⇒ ok:true) is
-// verified on Linux/macOS in 5b (DEFERRED-PENDING-LINUX/MACOS).
+// now VERIFIED-ON-LINUX: the real bubblewrap jail genuinely DENIED both escapes on kernel 6.18.x WSL2 +
+// bubblewrap 0.11.1 (fs by host-readback, net by ENETUNREACH under --unshare-net). macOS sandbox-exec
+// stays DEFERRED-PENDING-MACOS.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,8 +30,15 @@ export interface ProbeOutcome {
 // Writes THALOS_PROBE_TOKEN to THALOS_PROBE_OUTSIDE (a HOST path), then attempts an outbound socket.
 // FS verdict is by HOST-READBACK, not the probe's self-report: a container's fs is writable but
 // host-ISOLATED, so a probe that "wrote a file" did NOT necessarily reach the host — only the harness,
-// reading the host path afterwards, can tell whether the write truly escaped. NET is by probe report
-// (network isolation is real from inside the jail).
+// reading the host path afterwards, can tell whether the write truly escaped.
+//
+// NET probes a ROUTABLE, non-loopback address. `127.0.0.1` would be wrong: every network namespace has
+// its OWN loopback, present even under `--unshare-net`, so a loopback probe cannot tell an isolated
+// namespace from the host (verified on a real Linux kernel — DEFERRED-PENDING-LINUX). We use TEST-NET-1
+// (192.0.2.1, RFC 5737 documentation space): no real host is ever contacted — when net is denied the
+// kernel returns a no-route error IMMEDIATELY (isolated), and when net is present the SYN dies unrouted
+// (timeout). Only the no-route codes prove isolation; CONNECT / refused / reset / unknown / timeout all
+// mean the stack was REACHABLE ⇒ connectedOut:true (fail-closed: never claim an isolation we didn't see).
 const PROBE_SRC = `
 import fs from 'node:fs';
 import net from 'node:net';
@@ -39,10 +48,11 @@ const token = process.env.THALOS_PROBE_TOKEN || 'x';
 try { fs.writeFileSync(outside, token); out.selfWrote = true; } catch (e) { out.fsErr = e && e.code ? e.code : String(e); }
 let done = false;
 const finish = () => { if (done) return; done = true; process.stdout.write('PROBE:' + JSON.stringify(out)); process.exit(0); };
-const s = net.connect({ host: '127.0.0.1', port: 1 });
+const NET_BLOCKED = ['ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'EADDRNOTAVAIL'];
+const s = net.connect({ host: '192.0.2.1', port: 53 });
 s.on('connect', () => { out.connectedOut = true; finish(); });
-s.on('error', (e) => { const c = (e && e.code) || ''; if (c === 'ECONNREFUSED' || c === 'ETIMEDOUT' || c === 'ECONNRESET') out.connectedOut = true; else out.netErr = c; finish(); });
-setTimeout(finish, 1500);
+s.on('error', (e) => { const c = (e && e.code) || ''; if (NET_BLOCKED.indexOf(c) === -1) out.connectedOut = true; else out.netErr = c; finish(); });
+setTimeout(() => { out.connectedOut = true; finish(); }, 1500);
 `;
 
 interface ProbeReport {

@@ -827,11 +827,16 @@ The app runs AI agents that execute code on the user's machine, so safety is fir
 > inform via a host-visible manifest; the residual that a consented peer reads the pack is ACCEPTED,
 > not reversible). Token + explicit human admit + revoke; creds never cross.
 >
-> **DEFERRED, named (run for real on-target before trust):** real bubblewrap/sandbox-exec confinement
-> → DEFERRED-PENDING-LINUX / -MACOS (the self-test is the pre-trust gate; this Windows box has no
-> Linux/WSL/Docker, so no real jail is verifiable here — NoopSandbox, collab fail-closed); the real
-> cross-machine collab wire → DEFERRED-PENDING-MULTI-MACHINE (the in-process mock peer proves the trust
-> logic); the per-domain network-allowlist filtering proxy → DEFERRED.
+> **Sandbox confinement — Linux now VERIFIED:** the real bubblewrap jail genuinely confined on a real
+> kernel (2026-06-30, WSL2 6.18.x + bubblewrap 0.11.1) — the self-test's escape probe was DENIED on both
+> axes (fs by host-readback, net by `ENETUNREACH` under `--unshare-net`) ⇒ `selfTest().ok=true`, and the
+> router relaxation un-pinned a Codex builder. **VERIFIED-ON-LINUX.** macOS (sandbox-exec) stays
+> DEFERRED-PENDING-MACOS.
+>
+> **Still DEFERRED, named (run for real on-target before trust):** macOS sandbox-exec confinement →
+> DEFERRED-PENDING-MACOS; the real cross-machine collab wire → DEFERRED-PENDING-MULTI-MACHINE (a verified
+> local jail does NOT prove the network transport; the in-process mock peer proves only the trust logic);
+> the per-domain network-allowlist filtering proxy → DEFERRED.
 
 ---
 
@@ -843,13 +848,14 @@ Built using the very methodology the app implements: phased, verification-anchor
 > proven deterministically (`pnpm gate`) plus, where applicable, a real `--live` smoke. **\*The
 > asterisk is load-bearing:** what could not be verified on the build machine is **named and deferred
 > behind an on-target pre-trust gate**, never silently claimed "done" (see [DECISIONS](DECISIONS.md)
-> "Deferred / open items" for the single consolidated list — now **seven** items: the six prior
-> (`DEFERRED-PENDING-INSTALL` Codex/Gemini; `DEFERRED-PENDING-BUDGET` the `--live` greenfield smoke;
-> `DEFERRED-PENDING-LINUX` / `DEFERRED-PENDING-MACOS` real sandbox confinement;
-> `DEFERRED-PENDING-MULTI-MACHINE` the real collab wire; the per-domain network-allowlist proxy) **plus
-> `DEFERRED-PENDING-TOOLCHAIN`** — the native Tauri `tauri build` + packaged-app runtime smoke on a Rust
-> box. **Phase 6 ADDS a deferred item; it clears none.** The full SPEC §15 roadmap is now built and
-> logic-proven, with every on-hardware gate still standing.
+> "Deferred / open items" for the single consolidated list). **One gate has now CLEARED on real
+> hardware: `DEFERRED-PENDING-LINUX` → `VERIFIED-ON-LINUX` (2026-06-30)** — the real bubblewrap jail
+> genuinely confined on a real kernel (fs + net escapes DENIED ⇒ `selfTest().ok=true`; the relaxation
+> un-pinned Codex). **Six deferred items remain:** `DEFERRED-PENDING-INSTALL` (Codex/Gemini),
+> `DEFERRED-PENDING-BUDGET` (the `--live` greenfield smoke), `DEFERRED-PENDING-MACOS` (macOS sandbox-exec),
+> `DEFERRED-PENDING-MULTI-MACHINE` (the real collab wire), `DEFERRED-PENDING-TOOLCHAIN` (the native Tauri
+> build), and the per-domain network-allowlist proxy. The full SPEC §15 roadmap is built and logic-proven,
+> the Linux sandbox is hardware-verified, and the remaining gates still stand.
 
 **Phase 0 — Scaffolding.** Monorepo + workspaces; `thaloslab` bin with the menu and flags; daemon (Fastify + ws) with health; React+Vite UI shell with the left-rail layout and design tokens; SQLite + migrations; provider detection for **Claude only**; project create (new local + GitHub repo) and import (clone); `.thalos/` layout. *Outcome:* `thaloslab` launches, opens the UI, lists a project, detects Claude.
 
