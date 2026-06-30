@@ -2,8 +2,9 @@
 // trust LOGIC against mocks; here we guard the case the user reads hardest — a present-but-
 // misconfigured REAL binary. Trust must flow ONLY from a passed self-test, NEVER from "the binary is
 // there". On this Windows box there is no Linux/WSL/Docker, so NO real jail is verifiable here:
-// detectSandbox() falls back to NoopSandbox. The real bubblewrap confinement is DEFERRED-PENDING-LINUX,
-// gated by the same self-test running for real on-target before trust.
+// detectSandbox() falls back to NoopSandbox. The real bubblewrap confinement is now VERIFIED-ON-LINUX
+// (2026-06-30) — re-proven by the guarded `describe.runIf(linux + bwrap)` block below, which runs the
+// real self-test on any Linux box and skips here.
 import type { Sandbox, ToolPolicy } from '@thaloslab/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { whichSync } from '../which';
