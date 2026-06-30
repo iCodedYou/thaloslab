@@ -1,44 +1,15 @@
 // Adapter registry + detection sweep. detectAll() probes every adapter (zero token spend) and
 // upserts results into the providers table. Phase 1 adds mode-aware routing: --mock returns the
 // scripted mock adapter (zero tokens) for every role; --live/--preview return the real adapter.
-import type {
-  DetectedProvider,
-  ExecutionMode,
-  ProviderAdapter,
-  ProviderId,
-  SandboxCapability,
-} from '@thaloslab/shared';
+import type { DetectedProvider, ProviderId, SandboxCapability } from '@thaloslab/shared';
 import { getProject } from '../store/repositories/projects';
 import { listProviders, upsertProvider } from '../store/repositories/providers';
-import { claudeAdapter } from './claude';
-import { codexAdapter } from './codex';
-import { geminiAdapter } from './gemini';
-import { mockFor } from './mock';
+// The DB-FREE adapter access lives in ./adapters (so the collab peer can reuse it without the store);
+// re-exported here so existing importers (stage-runner, registry.test) are unchanged.
+import { getAdapter, getAdapters } from './adapters';
 import { type RouterCtx, sandboxSatisfies } from './router';
 
-// Registration order is the default preference order (claude > codex > gemini), per-project overridable.
-const adapters: ProviderAdapter[] = [claudeAdapter, codexAdapter, geminiAdapter];
-
-export function getAdapters(): ProviderAdapter[] {
-  return adapters;
-}
-
-export function getAdapter(id: ProviderId): ProviderAdapter | undefined {
-  return adapters.find((a) => a.id === id);
-}
-
-/**
- * Resolve the adapter for a role's provider in a given mode. In `--mock` EVERY invocation uses the
- * scripted mock adapter (no tokens) — this is the single switch that keeps mock runs deterministic.
- */
-export function adapterFor(providerId: ProviderId, mode: ExecutionMode): ProviderAdapter {
-  // In --mock every invocation uses a PROVIDER-TAGGED mock (deterministic, zero tokens). The tag
-  // lets a cross-provider mock run be told apart per provider while staying scripted.
-  if (mode === 'mock') return mockFor(providerId);
-  const adapter = getAdapter(providerId);
-  if (!adapter) throw new Error(`no provider adapter for "${providerId}"`);
-  return adapter;
-}
+export { getAdapters, getAdapter, adapterFor } from './adapters';
 
 /**
  * Build the router context from live state: detected providers (availability), the project's
@@ -54,7 +25,7 @@ export function routerCtx(projectId?: string, sandboxCaps: SandboxCapability[] =
     : undefined;
   return {
     availability: listProviders(),
-    preferenceOrder: configured ?? adapters.map((a) => a.id),
+    preferenceOrder: configured ?? getAdapters().map((a) => a.id),
     unmetFor: (id, policy) => {
       const adapter = getAdapter(id);
       if (!adapter) return ['no-adapter'];
@@ -70,7 +41,7 @@ export function routerCtx(projectId?: string, sandboxCaps: SandboxCapability[] =
 export async function detectAll(): Promise<DetectedProvider[]> {
   const now = Date.now();
   const results: DetectedProvider[] = [];
-  for (const adapter of adapters) {
+  for (const adapter of getAdapters()) {
     const probe = await adapter.detect();
     const provider: DetectedProvider = {
       id: adapter.id,
