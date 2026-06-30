@@ -19,6 +19,14 @@ export const DEFAULT_DAEMON_PORT = 8473;
 export const DAEMON_HOST = '127.0.0.1';
 export const HEALTH_PATH = '/health';
 
+/**
+ * Preferred port for the SEPARATE collab WS endpoint (SPEC §11) — distinct from the daemon's 8473 and
+ * from the zero-auth `/ws`. Bound ONLY while collab is active + the host consents, and (this phase)
+ * ONLY on `127.0.0.1`. Off-loopback (LAN/tunnel) is DEFERRED-PENDING-MULTI-MACHINE. Honors
+ * `THALOS_COLLAB_PORT` (mirrors `THALOS_DB_PATH`) for two-instance testing.
+ */
+export const DEFAULT_COLLAB_PORT = 8474;
+
 /** Per-project repo directory holding artifact bytes, agent configs, worktrees, logs. */
 export const THALOS_DIR_NAME = '.thalos';
 export const THALOS_CONFIG_NAME = 'config.json';
