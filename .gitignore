@@ -8,3 +8,24 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# --- secrets / credentials / local data (NEVER commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+.npmrc.local
+# Provider auth / config that may land if someone copies a home dir into the tree
+**/auth.json
+**/oauth_creds.json
+# Daemon SQLite DB + per-repo data dir (prompts/outputs/run data live here)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+smoke.db*
+.thalos/
+.thaloslab/
