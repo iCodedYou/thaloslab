@@ -1,25 +1,25 @@
 # Provider stream fixtures — provenance (READ THIS)
 
 These fixtures exercise the `codex.ts` / `gemini.ts` output parsers deterministically. Their
-**provenance is the load-bearing fact**:
+**provenance is the load-bearing fact** — and it now DIFFERS per fixture (some are real captures):
 
-> ⚠️ **RECONSTRUCTED, NOT CAPTURED.** Codex and Gemini are **not installed** on the machine this
-> phase was built on, so none of these samples were captured from a real CLI run. They are
-> **reconstructed from the documented output formats at the 2026-01 knowledge cutoff**. A fixture
-> hand-authored to match our own parser proves the parser is self-consistent with our *assumed*
-> format — it does **not** prove the parser handles **real** CLI output.
-
-So the conformance test that reads these is **conformance-UNVERIFIED**: it proves parser logic
-against the assumed shape, never real-output conformance. See the DEFERRED-PENDING-INSTALL checklist
-in `docs/DECISIONS.md`.
-
-| Fixture | Targets CLI version | Provenance | Status |
+| Fixture | Captured from | Provenance | Status |
 |---|---|---|---|
-| `codex-exec.jsonl` | codex `0.x` (assumed) | reconstructed from the documented `codex exec --json` event schema | conformance-UNVERIFIED |
-| `gemini-text.txt` | gemini `0.x` (assumed) | reconstructed from the documented headless `gemini --prompt` text output | conformance-UNVERIFIED |
-| `gemini-json.jsonl` | gemini `0.x` (assumed) | reconstructed from the documented structured output variant | conformance-UNVERIFIED |
+| `codex-exec.jsonl` | **codex-cli 0.142.2** | ✅ **REAL CAPTURE** — `codex exec --json` on a workspace-write task that ran a shell command (thread.started → turn.started → item.completed{agent_message} → item.started/completed{command_execution} → turn.completed{usage}) | **VERIFIED** |
+| `gemini-stream.jsonl` | **gemini 0.49.0** | ⚠️ **ENVELOPE REAL, assistant INFERRED** — the `init` + `message{role:'user'}` lines are a real `gemini --output-format stream-json` capture; the `message{role:'assistant'}` line is INFERRED from that envelope (a clean assistant/result capture was blocked by gemini API **503s**) | **PARTIALLY-VERIFIED** (re-capture deferred) |
+| `gemini-text.txt` | gemini (text mode) | reconstructed — exercises the tolerant non-JSON → stdout fallback path | reconstructed (fallback only) |
 
-**On install, before relying on these in `--live`:** re-capture each fixture from a real CLI run of
-the installed version, update the version stamp, and re-validate the parser + the `enforce()`
-unmet-set against the real `--help`/sandbox docs. If a fixture's stamped version differs from the
-installed CLI version, treat the fixture as STALE (needs re-capture), not just the code.
+> ⚠️ `gemini-stream.jsonl`'s **assistant line is not a real capture** — gemini API 503s blocked a clean
+> end-to-end stream. The stream-json *envelope* shape (`type`/`role`/`content`) IS real; the
+> assistant/result handling stays **DEFERRED-PENDING-INSTALL (gemini-stream-recapture)** until a clean
+> capture confirms the final-result event.
+
+**What was verified on install (2026-06-30):** both adapters' `enforce()` mappings were checked against
+the real `--help` + reality tests, and several reconstructed assumptions were WRONG and fixed (codex
+`--ask-for-approval` rejected; codex network relied on a user-overridable default; gemini `--exclude-tools`
+does not exist; gemini needs `--skip-trust`; gemini has `--output-format stream-json`). See the
+`codex.ts` / `gemini.ts` headers and `conformance.test.ts`.
+
+**Re-capture rule (unchanged):** if a fixture's stamped version differs from the installed CLI, treat
+the fixture as STALE (re-capture), not just the code. Re-validate the parser + the `enforce()` unmet-set
+against the real `--help`/sandbox docs.

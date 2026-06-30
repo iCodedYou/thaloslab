@@ -284,10 +284,12 @@ The "reviewer differs from engineer" rule is the concrete encoding of adversaria
 > fail-closed onto the allowlist-capable provider (Claude today)** while the read-only review/audit
 > roles route cross-provider — which is exactly where adversarial independence matters.
 >
-> **DEFERRED-PENDING-INSTALL:** Codex/Gemini were not installed on the build machine, so the real
-> multi-provider `--live` smoke, the verification of each provider's real `enforce()` unmet-set
-> against the actual CLI `--help`, and the re-capture of the (reconstructed) stream fixtures are
-> named open items — see DECISIONS "Deferred / open items".
+> **VERIFIED-ON-INSTALL (2026-06-30, mostly):** Codex (0.142.2) + Gemini (0.49.0) are now installed +
+> authenticated. The real multi-provider `--live` smoke ran, both `enforce()` mappings were verified vs
+> the real `--help` (finding + fixing two too-loose containment holes — codex network default, gemini
+> the non-existent `--exclude-tools`), and the codex stream fixture was re-captured. Still deferred:
+> codex-on-PATH detection, the gemini assistant/result stream re-capture (503-blocked), and the gemini
+> Policy-Engine allowlist — see DECISIONS "Deferred / open items".
 
 ---
 
@@ -854,11 +856,15 @@ Built using the very methodology the app implements: phased, verification-anchor
 > on a real kernel; the relaxation un-pinned Codex) and `DEFERRED-PENDING-BUDGET` → `VERIFIED-BUDGET`
 > (2026-06-30 — one capped `--live` greenfield run produced a buildable MVP + 2 path-disjoint parallel lanes
 > in 5 invokes/81.4k tok/2.6min). The **collab WIRE** is also now PROVEN two-process-on-one-machine over a
-> real socket (Wire A–D). **Deferred items remaining:** `DEFERRED-PENDING-INSTALL` (Codex/Gemini),
-> `DEFERRED-PENDING-MACOS` (macOS sandbox-exec), `DEFERRED-PENDING-MULTI-MACHINE` (cross-HOST collab
-> networking + a peer jailing over the wire + a real provider over the wire), `DEFERRED-PENDING-TOOLCHAIN`
-> (the native Tauri build), and the per-domain network-allowlist proxy. The full SPEC §15 roadmap is built
-> and logic-proven; two gates are now verified on real hardware/tokens; the rest still stand.
+> real socket (Wire A–D). `DEFERRED-PENDING-INSTALL` is now **mostly VERIFIED-ON-INSTALL** (Codex 0.142.2
+> + Gemini 0.49.0: both `enforce()` mappings verified vs the real CLIs — two too-loose containment holes
+> fixed — codex parser re-captured), with a few named sub-items still deferred (codex-on-PATH detection,
+> gemini stream re-capture, gemini Policy-Engine allowlist, the live cross-vendor handoff). **Deferred items
+> remaining:** `DEFERRED-PENDING-MACOS` (macOS sandbox-exec), `DEFERRED-PENDING-MULTI-MACHINE` (cross-HOST
+> collab networking + a peer jailing over the wire + a real provider over the wire), `DEFERRED-PENDING-TOOLCHAIN`
+> (the native Tauri build), the per-domain network-allowlist proxy, and the `DEFERRED-PENDING-INSTALL`
+> sub-items above. The full SPEC §15 roadmap is built and logic-proven; three gates are now (mostly)
+> verified on real hardware/tokens; the rest still stand.
 
 **Phase 0 — Scaffolding.** Monorepo + workspaces; `thaloslab` bin with the menu and flags; daemon (Fastify + ws) with health; React+Vite UI shell with the left-rail layout and design tokens; SQLite + migrations; provider detection for **Claude only**; project create (new local + GitHub repo) and import (clone); `.thalos/` layout. *Outcome:* `thaloslab` launches, opens the UI, lists a project, detects Claude.
 

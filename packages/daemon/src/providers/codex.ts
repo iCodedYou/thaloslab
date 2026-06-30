@@ -2,12 +2,17 @@
 // parsing its JSONL event stream into ProviderEvents; changedFiles come from `git diff` (shared
 // util). enforce() maps the neutral ToolPolicy onto Codex's sandbox + approval model.
 //
-// ⚠️ CONFORMANCE-UNVERIFIED (DEFERRED-PENDING-INSTALL): Codex is NOT installed on this machine, so
-// the exact `codex exec --json` event schema, the `--sandbox`/`--ask-for-approval` flags, and the
-// permission mapping below are RECONSTRUCTED from the documented format at the 2026-01 knowledge
-// cutoff — NOT captured from a real run. The version guard + tolerant parser are the mitigations;
-// the parser must be re-validated against a real capture, and the enforce() unmet-set against the
-// real `codex --help`/sandbox docs, before relying on this in --live.
+// ✅ VERIFIED-AGAINST-REAL-CLI (codex-cli 0.142.2, 2026-06-30). The enforce-mapping + parser were
+// checked against the real CLI's `--help` and a real `codex exec --json` capture. Corrections from the
+// reconstructed version: (1) REMOVED `--ask-for-approval never` — `exec` is non-interactive and the
+// real CLI REJECTS that flag (it would have failed every run); (2) network:none now EXPLICITLY passes
+// `-c sandbox_workspace_write.network_access=false` instead of trusting the (user-config-OVERRIDABLE)
+// default — closing a too-loose mapping. Confirmed correct as-was: `--sandbox read-only|workspace-write`
+// (coarse — so `command-allowlist`/`no-exec` are genuinely UNMET), `--json` JSONL. The parser matches
+// the real stream (thread.started → turn.started → item.completed{agent_message} → turn.completed).
+// changedFiles still come from host git, never the model's self-report.
+// ⚠️ Detection gap: codex installs OFF-PATH here (~/AppData/Local/OpenAI/Codex/bin/<hash>) — `whichSync`
+// needs it on PATH to detect()/invoke() it (DEFERRED-PENDING-INSTALL: codex-on-PATH).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -53,20 +58,27 @@ const CODEX_SPEC: CliSpec = {
  * fails closed off Codex for builders). Read-only maps cleanly (the differ roles).
  */
 export function enforceCodex(policy: ToolPolicy): EnforceResult {
-  const args = ['exec', '--json', '--ask-for-approval', 'never'];
+  // `exec` is non-interactive — it never prompts, so there is NO `--ask-for-approval` flag (the real
+  // codex-cli 0.142 REJECTS it). The sandbox MODE is the containment; `--json` streams JSONL events.
+  const args = ['exec', '--json'];
   const unmet: string[] = [];
   if (!policy.canWrite && !policy.canExecCommands) {
-    args.push('--sandbox', 'read-only');
+    args.push('--sandbox', 'read-only'); // differ roles: no writes, no exec, no network
   } else if (policy.canExecCommands) {
     args.push('--sandbox', 'workspace-write');
-    // Codex cannot restrict execution to a per-command allowlist (approval is coarse).
+    // Codex's sandbox is COARSE (read-only / workspace-write / danger-full-access) — there is no
+    // per-command allowlist flag, so this constraint is genuinely UNMET.
     if (policy.commandAllowlist?.length) unmet.push('command-allowlist');
   } else {
-    // write-but-no-exec: codex's workspace-write also permits commands → cannot guarantee no-exec.
+    // write-but-no-exec: workspace-write also permits shell → cannot guarantee no-exec.
     args.push('--sandbox', 'workspace-write');
     unmet.push('no-exec');
   }
-  // Codex's sandbox disables network by default; a precise per-domain allowlist is not expressible.
+  // network:none — workspace-write's network IS off by DEFAULT, but a user `~/.codex/config` could turn
+  // it ON, so enforce it EXPLICITLY (never rely on a user-overridable default for containment). The
+  // read-only mode has no network by the mode. A precise per-domain allowlist is not expressible.
+  if (policy.network === 'none' && (policy.canWrite || policy.canExecCommands))
+    args.push('-c', 'sandbox_workspace_write.network_access=false');
   if (policy.network === 'allowlist' && policy.networkAllowlist?.length)
     unmet.push('network-allowlist');
   return { args, unmet };

@@ -359,7 +359,7 @@ away). *Refines SPEC §4 / §13 / §15.*
 
 | Tag | What | Pre-trust gate that runs before it's trusted |
 |---|---|---|
-| `DEFERRED-PENDING-INSTALL` | Codex/Gemini real `enforce()` mapping + stream-parser conformance (Phase 3) | run the real CLI: verify `unmet`-set vs `--help`, re-capture the stream fixtures |
+| ✅ `VERIFIED-ON-INSTALL` (2026-06-30, **mostly**) | Codex/Gemini real `enforce()` mapping + stream-parser conformance (Phase 3) | DONE for the safety-critical core, against codex-cli **0.142.2** + gemini **0.49.0**: both `enforce()` mappings checked vs real `--help` + reality tests; reconstructed mistakes FOUND + FIXED — codex `--ask-for-approval` (rejected by exec) removed; codex network:none made EXPLICIT (`-c sandbox_workspace_write.network_access=false`) instead of a user-overridable default (too-loose); gemini `--exclude-tools` (DOES NOT EXIST — exit 1) replaced with `--approval-mode plan`/`yolo` + `--skip-trust`; gemini `network-none` now UNMET for builders (too-loose — web tools weren't actually disablable); gemini `--output-format stream-json` adopted. Codex parser VERIFIED vs a real capture. The cross-vendor ROUTING is verified deterministically (`cross-provider.test.ts`). **STILL DEFERRED (4 sub-items):** (a) `codex-on-PATH` — codex installs OFF-PATH (`~/AppData/Local/OpenAI/Codex/bin/<hash>`) so `whichSync` can't detect it; (b) `gemini-stream-recapture` — the assistant/result stream event is INFERRED (gemini API 503s blocked a clean capture); (c) gemini per-command allowlist via the Policy Engine (`--policy`) — kept UNMET/strict, not built; (d) `live-xvendor-handoff` — a real claude-builds→codex-reviews `--live` run was NOT reached (the bug-fix `repro`/test-author stage doom-loops under live ×3 before the reviewer; the feature workflow has no reviewer) |
 | ✅ `VERIFIED-BUDGET` (2026-06-30) | the `--live` greenfield smoke (Phase 4) — **RAN, one real spec** | DONE: a capped `--live` run (real Claude, `scripts/smoke-greenfield.ts`) on a small spec (`wc-lite`, a minimal `wc`) reached `done` in **5 invokes / 81.4k tokens / 2.6 min / 2 lanes** — well under every cap (12/300k/15min/2). The architect invented structure and decomposed into **2 genuinely PATH-disjoint lanes** (`src/count.js` vs `bin/wc-lite.js`+`package.json`) that ran as parallel seam worktrees — NOT collapsed to one. The MVP is BUILDABLE: `printf 'hello world\n' \| node bin/wc-lite.js` → `1 2 12` (acceptance met); `main` was never touched; integration-sweep gated `done`. Nuance (real-world messiness, MVP still correct): the CLI lane **inlined** its own counting logic instead of importing the lane-0 contract, and the scaffold left orphan stubs (`count.js`/`cli.js`) — so path-disjoint held, but logic-DRY did not. **One run, not a guarantee every greenfield holds.** |
 | ✅ `VERIFIED-ON-LINUX` (2026-06-30) | real bubblewrap confinement (Phase 5) — **VERIFIED** | DONE: the real self-test's escape probe was genuinely DENIED on kernel `6.18.33.2-microsoft-standard-WSL2` + bubblewrap 0.11.1 — fs by host-readback, net by `ENETUNREACH` under `--unshare-net` ⇒ `selfTest().ok=true`; the router relaxation then un-pinned a Codex builder, while Noop re-pinned to Claude. See "Phase 5 sandbox — VERIFIED-ON-LINUX" below |
 | `DEFERRED-PENDING-MACOS` | sandbox-exec/Lima (not yet implemented) (Phase 5) | the same self-test on macOS |
@@ -448,20 +448,38 @@ spec — it proves the greenfield flow works under real tokens, not that every g
 
 
 
-**DEFERRED-PENDING-INSTALL (Phase 3 — Codex/Gemini not installed on the build machine).** Phase 3 is
-mechanically complete and deterministically proven (router + parser LOGIC), but **live-unverified**
-for Codex/Gemini until those CLIs are present. Before relying on them in `--live`:
+**✅ VERIFIED-ON-INSTALL, mostly (2026-06-30 — codex-cli 0.142.2 + gemini 0.49.0).** Codex + Gemini are
+now installed + authenticated, and the three checklist items below were run against the real CLIs:
 
-1. **Real multi-provider `--live` smoke** — one ticket where the reviewer runs on a genuinely
-   different installed provider than the engineer (the canary for flag/output drift).
-2. **Verify each provider's real `enforce()` unmet-set** against the actual `codex`/`gemini`
-   `--help` + sandbox docs. The mapping in `codex.ts`/`gemini.ts` is an ASSUMPTION — a wrong mapping
-   is either a needless Claude-pin (mocked `unmet` but really capable) or a real **safety hole**
-   (mocked met but really can't enforce). The mock validates router logic, never the mapping itself.
-3. **Re-validate the stream fixtures** (`fixtures/streams/`) against the installed CLI version and
-   **re-capture** them — they are RECONSTRUCTED from documented formats, not captured from a real
-   run (see `fixtures/streams/PROVENANCE.md`). A fixture whose stamped version differs from the
-   installed CLI is STALE (re-capture), not just the code.
+1. **Real multi-provider `--live` smoke** — ATTEMPTED (`scripts/smoke-xvendor.ts`), with an honest gap.
+   The cross-vendor ROUTING is verified DETERMINISTICALLY (`cross-provider.test.ts`: with claude + codex
+   available, the engineer routes → claude and the reviewer → codex, reviewer-differs-by-vendor), and all
+   three CLIs detect installed+authed + codex runs real (standalone captures). BUT the live end-to-end
+   handoff (claude builds → codex reviews over real tokens) was NOT reached: the bug-fix workflow
+   consistently ESCALATED at the `repro` (test-author) stage — a doom-loop at retry-cap (3 claude runs
+   `ok`, but the repro-red gate unsatisfied) — across 3 attempts; the feature workflow has no reviewer
+   stage. So a real codex-reviews-claude invocation is **not yet demonstrated** → stays DEFERRED
+   (`live-xvendor-handoff` — a `--live` repro-stage-gate issue, DISTINCT from the codex/gemini verification).
+2. **Real `enforce()` unmet-set verification** — DONE, and it FOUND REAL MISTAKES (the point of the
+   exercise): the mappings were RECONSTRUCTED and several were wrong. Both **too-loose** mappings
+   (containment we claimed but didn't have) are fixed: **codex network:none** relied on a
+   *user-config-overridable default* → now passes `-c sandbox_workspace_write.network_access=false`
+   explicitly; **gemini network:none for builders** was "satisfied" by excluding web tools via
+   `--exclude-tools` — *a flag that does not exist* → now UNMET (fail closed). Two **broken** flags that
+   would have failed every real run (loud, not silent) are fixed: codex `--ask-for-approval` (rejected by
+   `exec`) removed; gemini `--exclude-tools` replaced with `--approval-mode plan|yolo` + `--skip-trust`.
+   Confirmed-correct strict mappings kept: codex `command-allowlist`/`no-exec` UNMET (coarse sandbox);
+   gemini `command-allowlist` UNMET (Policy Engine out of scope).
+3. **Stream fixtures re-captured** — codex `codex-exec.jsonl` is now a REAL capture (parser VERIFIED);
+   gemini `gemini-stream.jsonl` has a real `init`/user envelope but an INFERRED assistant line (a clean
+   capture was blocked by gemini API 503s).
+
+**Still DEFERRED (named):** (a) `codex-on-PATH` — codex installs OFF-PATH so `whichSync` can't `detect()`
+it without the bin on PATH; (b) `gemini-stream-recapture` — confirm the assistant/result stream event on
+a clean (non-503) capture; (c) gemini per-command allowlist via the Policy Engine (`--policy`) — kept
+strict/UNMET, not built. A wrong mapping is still either a needless Claude-pin (lost capability) or a
+real **safety hole** (claimed containment that isn't there) — the two too-loose holes above were the
+priority and are closed.
 
 ---
 
@@ -476,7 +494,7 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§9** — GitHub optional, not required; engineer network defaults to allowlist (not none); local repo always created, GitHub create/push best-effort → local-only (#18).
 - **§10** — track `agents/` + `config.json`; gitignore `artifacts/` + `worktrees/` + `runs.log` by default; one global SQLite DB holds all tables incl. artifact index, `.thalos/` holds bytes (#14).
 - **§11** — default collab sharing scope = brief + worktree + interface context pack, secrets stripped.
-- **§5** — the engine speaks a neutral `ToolPolicy`; adapters' `enforce()→{args,unmet}` translate it (#25); the constraint-aware router picks the provider fail-closed, reviewer-must-differ / auditor-prefers, nothing-eligible → PARK (#26). Codex/Gemini are live-unverified (DEFERRED-PENDING-INSTALL above).
+- **§5** — the engine speaks a neutral `ToolPolicy`; adapters' `enforce()→{args,unmet}` translate it (#25); the constraint-aware router picks the provider fail-closed, reviewer-must-differ / auditor-prefers, nothing-eligible → PARK (#26). Codex/Gemini `enforce()` mappings + the codex parser are now VERIFIED-ON-INSTALL vs the real CLIs (codex 0.142.2, gemini 0.49.0 — two too-loose holes fixed); a few sub-items stay deferred (codex-on-PATH, gemini-stream-recapture, gemini Policy-Engine allowlist — see above).
 - **§6** — `phase` is load-bearing: a bootstrapping scratch project runs the greenfield workflow (phase-driven intake); `done` flips bootstrapping→maintenance, bound to reconcile's done-path; the scaffold BORNS the baseline so ticket #2 gets differential gating back (#27).
 - **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23); greenfield gating is ABSOLUTE (gate commands read from the worktree; integration-sweep is the MVP-exists gate with teeth); the MVP never auto-lands on `main` (#27). The `--live` greenfield smoke is **VERIFIED-BUDGET** (above — one capped run: a real architect invented a buildable MVP + 2 path-disjoint parallel lanes under the caps).
 - **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
