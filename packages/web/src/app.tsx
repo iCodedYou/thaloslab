@@ -1,6 +1,7 @@
 import { LeftRail } from './layout/LeftRail';
 import { AgentsPage } from './pages/Agents';
 import { CollabPage } from './pages/Collab';
+import { InsightsPage } from './pages/Insights';
 import { MainPage } from './pages/Main';
 import { OrchestratorPage } from './pages/Orchestrator';
 import { TicketsPage } from './pages/Tickets';
@@ -25,6 +26,7 @@ export function App() {
         {activeNav === 'tickets' && <TicketsPage />}
         {activeNav === 'agents' && <AgentsPage />}
         {activeNav === 'collab' && <CollabPage />}
+        {activeNav === 'insights' && <InsightsPage />}
         {activeNav === 'settings' && <Placeholder label="Settings" />}
       </main>
     </div>

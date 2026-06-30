@@ -146,6 +146,35 @@ export function useCollabAction() {
   });
 }
 
+// ---- Observability (SPEC §15, Phase 6) — metadata-only rollups ----
+
+export interface Rollup {
+  scopeId: string;
+  scopeKind: 'project' | 'ticket' | 'provider' | 'peer';
+  runCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  durationMs: number;
+  statusBreakdown: Record<string, number>;
+}
+export interface ProjectTelemetry {
+  project: Rollup;
+  byProvider: Rollup[];
+  byPeer: Rollup[];
+  escalationCount: number;
+  eventCounts: Record<string, number>;
+}
+
+export function useObservability(projectId?: string) {
+  return useQuery({
+    queryKey: ['observability', projectId],
+    queryFn: () => apiGet<ProjectTelemetry>(`/api/observability/${projectId}`),
+    enabled: Boolean(projectId),
+    refetchInterval: 4000,
+  });
+}
+
 export function useResolveGate() {
   const qc = useQueryClient();
   return useMutation({
