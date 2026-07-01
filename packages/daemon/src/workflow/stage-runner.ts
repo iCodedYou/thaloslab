@@ -19,8 +19,10 @@ import type {
   SandboxCapability,
   Ticket,
 } from '@thaloslab/shared';
+import { collabService } from '../collab/collab-service';
 import { adapterFor, getAdapter, routerCtx as defaultRouterCtx } from '../providers/registry';
-import { type RouterCtx, resolveForInvoke } from '../providers/router';
+import { type Differ, type RouterCtx, resolveForInvoke } from '../providers/router';
+import { type CollabRoute, projectCollabEnabled, resolveCollabRoute } from './collab-route';
 import { detectSandbox, scopeFor, verifiedSelfTest } from '../providers/sandbox';
 import { getAgent } from '../store/repositories/agents';
 import { getProject } from '../store/repositories/projects';
@@ -94,6 +96,14 @@ export interface StageRunnerDeps {
    *  `sandboxCaps` = constraints a VERIFIED jail makes moot for this run (Phase 5); the router relaxes
    *  the unmet-set by them ONLY because the same run will actually be wrapped (see the binding below). */
   routerCtx?: (projectId?: string, sandboxCaps?: SandboxCapability[]) => RouterCtx;
+  /** Injectable collab-dispatch decision (fail-closed gate). Defaults to the real project opt-in
+   *  (`routingPolicy.collab`) + the live `collabService` routability. Tests inject a fixed decision. */
+  resolveCollab?: (
+    agent: AgentConfig,
+    differ: Differ,
+    avoidProvider: ProviderId | undefined,
+    ticket: Ticket | null,
+  ) => CollabRoute;
 }
 
 /** The engineer's ACTUAL provider for this change — read from the run of the task(s) this one
@@ -107,15 +117,28 @@ function avoidProviderFor(ticketId: string, task: { dependsOn: string[] }): Prov
   return undefined;
 }
 
-/** AgentConfig.provider as a concrete ProviderId, or undefined for 'auto'/'collab:'. */
+/** AgentConfig.provider as a concrete ProviderId, or undefined for 'auto'. Collab targets are handled
+ *  upstream by the collab-dispatch gate (`resolveCollabRoute`) and never reach the local router path. */
 function preferredProvider(agent: AgentConfig): ProviderId | undefined {
-  const p = agent.provider;
-  return p !== 'auto' && !p.startsWith('collab:') ? (p as ProviderId) : undefined;
+  return agent.provider === 'auto' ? undefined : (agent.provider as ProviderId);
 }
 
 export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner {
   const now = deps.now ?? (() => Date.now());
   const buildRouterCtx = deps.routerCtx ?? defaultRouterCtx;
+  // The collab-dispatch decision. Default: non-collab targets short-circuit to 'local' WITHOUT touching
+  // the project/collabService (the common case pays nothing); a collab target consults the project opt-in
+  // + the LIVE peer routability.
+  const resolveCollab =
+    deps.resolveCollab ??
+    ((agent, differ, avoidProvider, ticket): CollabRoute => {
+      if (!agent.provider.startsWith('collab:')) return { kind: 'local' };
+      return resolveCollabRoute(agent.provider, differ, avoidProvider, {
+        collabEnabled: projectCollabEnabled(ticket ? getProject(ticket.projectId) : undefined),
+        isRoutable: (peerId) =>
+          collabService.state().peers.some((p) => p.peerId === peerId && p.routable),
+      });
+    });
   // One worktree per LANE — sequential stages share a lane; parallel fan-out children get distinct
   // lanes (isolated worktrees). The Map is a cache, NOT truth: createWorktree adopts-or-creates so a
   // crash that loses this Map but leaves the lane on disk recovers cleanly.
@@ -427,6 +450,34 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       const agent = resolveAgent(task.agentId, role);
       const policy = policyFor(agent);
       const differ = differFor(role);
+
+      // Collab DISPATCH gate (fail-closed) — BEFORE any side effect. An explicit, project-opted-in,
+      // currently-routable collab target routes to a remote peer; anything else PARKS (never a silent
+      // fall-back to a local provider). 'auto'/local targets return 'local' and take the router path below.
+      const collab = resolveCollab(
+        agent,
+        differ,
+        differ !== 'none' ? avoidProviderFor(ticketId, task) : undefined,
+        ticket,
+      );
+      if (collab.kind === 'park') {
+        return {
+          ok: false,
+          escalate: true,
+          changedFiles: [],
+          output: `collab routing failed closed: ${collab.reason}`,
+        };
+      }
+      if (collab.kind === 'collab') {
+        // G1 wires the real dispatch (makeCollabAdapter over the live PeerLink) here. Until then FAIL
+        // CLOSED — a routable target must not silently no-op (and must not fall through to a local run).
+        return {
+          ok: false,
+          escalate: true,
+          changedFiles: [],
+          output: `collab dispatch to ${collab.providerId} is not yet wired (G1)`,
+        };
+      }
 
       // Phase 5: the platform sandbox + its self-test verdict. Capabilities are platform-level (not
       // worktree-specific), so we learn them BEFORE the worktree and feed only the TRUSTED set (empty
