@@ -26,6 +26,14 @@ export function projectCollabEnabled(project: Project | null | undefined): boole
   return project?.routingPolicy?.collab === true;
 }
 
+/** Well-formed `collab:<peerId>:<vendor>` (both segments non-empty) — the single source of the target-id
+ *  format, used by `resolveCollabRoute` and validated at config time (the routing-policy PATCH). */
+export function isCollabProviderId(id: unknown): id is ProviderId {
+  if (typeof id !== 'string' || !id.startsWith('collab:')) return false;
+  const [, peerId, vendor] = id.split(':');
+  return Boolean(peerId) && Boolean(vendor);
+}
+
 /**
  * Decide a task's collab routing. Returns `local` for any non-collab target (so `'auto'` and local
  * provider ids NEVER dispatch remote), `collab` only when both gates pass and the differ-by-vendor rule

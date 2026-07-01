@@ -37,6 +37,20 @@ export function setProjectPhase(id: string, phase: ProjectPhase): void {
   getDb().update(projects).set({ phase }).where(eq(projects.id, id)).run();
 }
 
+/** Set a project's routing policy (the collab opt-in + per-role collab targets live here). Serialized
+ *  the same way as `insertProject`; `undefined` clears it. The DB is authoritative (`.thalos` mirror is a
+ *  follow-up). */
+export function setProjectRoutingPolicy(
+  id: string,
+  routingPolicy: Record<string, unknown> | undefined,
+): void {
+  getDb()
+    .update(projects)
+    .set({ routingPolicyJson: routingPolicy ? JSON.stringify(routingPolicy) : null })
+    .where(eq(projects.id, id))
+    .run();
+}
+
 export function insertProject(p: Project): Project {
   getDb()
     .insert(projects)
