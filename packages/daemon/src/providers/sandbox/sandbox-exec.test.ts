@@ -13,7 +13,7 @@ import path from 'node:path';
 import type { Sandbox } from '@thaloslab/shared';
 import { describe, expect, it } from 'vitest';
 import { netBlockedCodes, runEscapeProbe, verdictFromProbe } from './selftest';
-import { sandboxExecSandbox, seatbeltProfile } from './sandbox-exec';
+import { sandboxExecSandbox, sbplString, seatbeltProfile } from './sandbox-exec';
 
 const isDarwin = process.platform === 'darwin';
 
@@ -24,7 +24,7 @@ describe('seatbelt profile generation (the jail RULES — not a confinement proo
       const p = seatbeltProfile({ fsScope: { rw: [dir], hideRest: true }, network: 'none' });
       expect(p).toContain('(allow default)');
       expect(p).toContain('(deny file-write*)');
-      expect(p).toContain(`(subpath "${dir}")`); // the rw set, canonicalized, re-allowed
+      expect(p).toContain(`(subpath ${sbplString(dir)})`); // the rw set, canonicalized + SBPL-escaped, re-allowed (portable: a Windows `\` path is escaped, not raw)
       expect(p).toContain('(deny network*)');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

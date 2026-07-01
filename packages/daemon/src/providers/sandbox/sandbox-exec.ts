@@ -45,8 +45,10 @@ function realpath(p: string): string {
 }
 
 /** Escape a path for an SBPL double-quoted string literal (defensive — worktree paths rarely contain
- *  these, but a stray `"`/`\` would otherwise break the profile). */
-function sbplString(p: string): string {
+ *  these, but a stray `"`/`\` would otherwise break the profile). Exported so the generator test
+ *  asserts against the SAME encoding rather than assuming POSIX slashes (a Windows `\` path is escaped
+ *  to `\\` here, which a naive substring check would miss — the cross-platform-portability bug). */
+export function sbplString(p: string): string {
   return `"${p.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
