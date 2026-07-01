@@ -8,6 +8,7 @@ import { assignProvider } from '../../providers/router';
 import { upsertAgent, writeAgentFile } from '../../store/repositories/agents';
 import { getProject } from '../../store/repositories/projects';
 import { getTicket, listTickets, updateTicketTriage } from '../../store/repositories/tickets';
+import { projectCollabEnabled, projectCollabTargets } from '../collab-route';
 import type { Engine } from '../engine';
 import { policyFor } from '../roster/role-defaults';
 import { greenfieldTemplate, selectTemplate } from '../templates';
@@ -70,11 +71,19 @@ export async function intakeTicket(
   // Persist the assembled roster (DB index + git-tracked .thalos/agents mirror). Resolve each
   // agent's 'auto' provider to a concrete PREFERRED provider via the router (the invoke-time
   // resolution re-checks + enforces the reviewer-differs rule against the engineer's actual run).
+  //
+  // Collab BORN-targeting: when the project opted in (`routingPolicy.collab`), an agent whose ROLE has a
+  // collab target is BORN with `provider=collab:<peer>:<vendor>` HERE, at assembly — never a mid-flight
+  // retarget (that was racy). Fan-out engineer lanes all share this one engineer agent (`roleAgentId`),
+  // so every lane inherits the target with no race. This only PRODUCES the target the G0 dispatch gate
+  // consumes — the gate still checks routability LIVE (an offline-peer target PARKS at run time).
   const repoPath = project?.repoPath;
   const ctx = routerCtx(req.projectId);
+  const collabTargets = projectCollabEnabled(project) ? projectCollabTargets(project) : {};
   for (const agent of roster) {
-    const resolved = assignProvider(ctx, policyFor(agent));
-    const withProvider = resolved ? { ...agent, provider: resolved } : agent;
+    const provider =
+      collabTargets[agent.role] ?? assignProvider(ctx, policyFor(agent)) ?? undefined;
+    const withProvider = provider ? { ...agent, provider } : agent;
     upsertAgent(withProvider);
     if (repoPath) writeAgentFile(repoPath, withProvider);
   }

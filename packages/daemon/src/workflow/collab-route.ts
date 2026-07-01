@@ -5,7 +5,7 @@
 // role) its vendor differs from the engineer's. Anything else PARKS — NEVER a silent fall-back to a local
 // provider, and an 'auto'/local target is NEVER a collab pick (a collab adapter's enforce() has nothing
 // unmet, so it is always "capable" — it must never enter automatic routing, only explicit dispatch).
-import type { Project, ProviderId } from '@thaloslab/shared';
+import type { AgentRole, Project, ProviderId } from '@thaloslab/shared';
 import { type Differ, vendorOf } from '../providers/router';
 
 export type CollabRoute =
@@ -32,6 +32,21 @@ export function isCollabProviderId(id: unknown): id is ProviderId {
   if (typeof id !== 'string' || !id.startsWith('collab:')) return false;
   const [, peerId, vendor] = id.split(':');
   return Boolean(peerId) && Boolean(vendor);
+}
+
+/** The project's per-role collab targets — role → a well-formed `collab:<peer>:<vendor>` id. Assembly
+ *  BORNS the matching role's agent with this provider (only when `projectCollabEnabled`), so the agent
+ *  is born collab-targeted (never a racy mid-flight retarget). Malformed/junk entries are dropped. */
+export function projectCollabTargets(
+  project: Project | null | undefined,
+): Partial<Record<AgentRole, ProviderId>> {
+  const raw = project?.routingPolicy?.collabTargets;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Partial<Record<AgentRole, ProviderId>> = {};
+  for (const [role, id] of Object.entries(raw as Record<string, unknown>)) {
+    if (isCollabProviderId(id)) out[role as AgentRole] = id;
+  }
+  return out;
 }
 
 /**
