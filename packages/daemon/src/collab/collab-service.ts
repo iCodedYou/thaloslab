@@ -2,6 +2,7 @@
 // (CollabEndpoint), so enable/disable/admit/revoke drive BOTH atomically. CollabHost stays a pure,
 // deterministic predicate source; this service is the only place that also touches the listener/sockets.
 import type { ProviderAdapter } from '@thaloslab/shared';
+import { log } from '../logger';
 import { registerAdapter, unregisterPeerAdapters } from '../providers/adapters';
 import { peerRoutable } from './protocol';
 import { CollabRuntime, collab } from './runtime';
@@ -42,7 +43,10 @@ export class CollabService {
     const host = collabBindHost({ active: true, exposure: opts.exposure });
     const port = await this.endpoint.start({ host, port: opts.port ?? collabPort() });
     if (opts.exposure === 'tailnet') {
-      console.warn(
+      // Through the daemon logger (not console) so the consent is RECORDED in daemon.log — a console
+      // line is discarded under the daemon's `stdio:'ignore'` spawn, i.e. not actually "loud".
+      log(
+        'warn',
         `[collab] endpoint bound OFF-LOOPBACK to ${host}:${port} — tailnet exposure ENABLED by ` +
           'explicit host consent (reachable by admitted, sandbox-verified peers on this tailnet only)',
       );

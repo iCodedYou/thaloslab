@@ -363,10 +363,11 @@ away). *Refines SPEC §4 / §13 / §15.*
 | ✅ `VERIFIED-BUDGET` (2026-06-30) | the `--live` greenfield smoke (Phase 4) — **RAN, one real spec** | DONE: a capped `--live` run (real Claude, `scripts/smoke-greenfield.ts`) on a small spec (`wc-lite`, a minimal `wc`) reached `done` in **5 invokes / 81.4k tokens / 2.6 min / 2 lanes** — well under every cap (12/300k/15min/2). The architect invented structure and decomposed into **2 genuinely PATH-disjoint lanes** (`src/count.js` vs `bin/wc-lite.js`+`package.json`) that ran as parallel seam worktrees — NOT collapsed to one. The MVP is BUILDABLE: `printf 'hello world\n' \| node bin/wc-lite.js` → `1 2 12` (acceptance met); `main` was never touched; integration-sweep gated `done`. Nuance (real-world messiness, MVP still correct): the CLI lane **inlined** its own counting logic instead of importing the lane-0 contract, and the scaffold left orphan stubs (`count.js`/`cli.js`) — so path-disjoint held, but logic-DRY did not. **One run, not a guarantee every greenfield holds.** |
 | ✅ `VERIFIED-ON-LINUX` (2026-06-30) | real bubblewrap confinement (Phase 5) — **VERIFIED** | DONE: the real self-test's escape probe was genuinely DENIED on kernel `6.18.33.2-microsoft-standard-WSL2` + bubblewrap 0.11.1 — fs by host-readback, net by `ENETUNREACH` under `--unshare-net` ⇒ `selfTest().ok=true`; the router relaxation then un-pinned a Codex builder, while Noop re-pinned to Claude. See "Phase 5 sandbox — VERIFIED-ON-LINUX" below |
 | ✅ `VERIFIED-ON-MACOS` (2026-06-30) | native macOS **sandbox-exec (Seatbelt)** confinement (Phase 5) — **VERIFIED** | DONE on **macOS 26.3 (build 25D125) / arm64 (Apple M4 Pro)**: the real self-test's escape probe was genuinely DENIED on both axes — fs by host-readback (a write to a HOST path OUTSIDE the rw set returned `EPERM` and never reached the host file), net by `EPERM` at the socket under `(deny network*)` — ⇒ `selfTest().ok=true`; a hollow/toothless `(allow default)` profile still ESCAPES ⇒ `ok=false` (the verifier does not rubber-stamp the binary's presence). The Linux-shaped net-blocked errno set was extended (DARWIN-GUARDED) to recognize Seatbelt's `EPERM`/`EACCES` syscall denial — same defect class as the Linux loopback-probe bug, fixed the same way. Exact invocation: `sandbox-exec -p '<SBPL profile>' <cmd> <args>`. Guarded test `sandbox-exec.test.ts` (`describe.runIf(darwin)`) re-runs it; skips off-macOS. See "Phase 5 sandbox — VERIFIED-ON-MACOS" below |
-| `DEFERRED` (collab — peer-agent entrypoint) | a runnable peer-agent PROCESS (Phase 5). `connectPeer`/`buildPeerHello`/`runPeerInvoke` exist and are exercised in-test, but there is NO production bin/entrypoint that boots a standalone peer-agent, dials a host URL+token, and serves invokes — so a (now sandbox-verified) macOS box cannot yet join a real pool outside the test harness. This is the next step after the verified backend, kept DISTINCT from it | a `thaloslab` peer entrypoint that constructs the hello, dials the host, and serves `runPeerInvoke`, joined against a live host |
-| `DEFERRED-PENDING-MULTI-MACHINE` | **cross-HOST** collab networking — NAT/tunnel (cloudflared/ngrok)/latency/a genuinely remote peer + the off-loopback bind (Phase 5). The WIRE itself (transport + protocol + trust state machine) is now PROVEN two-process-on-one-machine over a real socket; what remains is real *networking* between machines | a real second machine joins over the tunnel and runs the collab suite; the off-loopback bind opt-in implemented + reviewed |
-| `DEFERRED` (collab — jail-over-wire) | a peer GENUINELY jailing the host's task *over the wire* (Phase 5). The Wire D happy-path peer used a test SEAM (`confiningBackend`), NOT a real jail — it proves the wire + quarantine flow, not confinement-over-the-wire | run the peer-agent on a box with a VERIFIED jail — WSL/Linux (bubblewrap, VERIFIED-ON-LINUX) **or now macOS (sandbox-exec, VERIFIED-ON-MACOS)** — so its REAL jail confines a task arriving over the real socket (needs the peer-agent entrypoint above) |
-| `DEFERRED` (collab — real-provider) | a REAL provider (Claude/Codex/Gemini) executing a peer's task over the wire with real tokens (Phase 5). The wire tests run the peer in `--mock` (deterministic, zero cost) | a capped `--live` collab smoke: a real CLI runs a peer's task end to end over the socket |
+| ✅ `collab peer-agent entrypoint` (2026-06-30) | a runnable peer-agent PROCESS (Phase 5, **F1**) | DONE: `thaloslab peer` boots a standalone **DB-less** peer-agent (separate tsup bundle — no better-sqlite3/Fastify in its closure, grep-proven), self-tests its OWN sandbox honestly, dials host URL+token, parks/serves. Axis 1 proven through the **REAL bin** on Windows (honest Noop self-test → refused at join, exit 3) + mutation proof (flip ONLY the verdict → admittable) — the refusal is verdict-driven, not hardcoded |
+| ✅ `VERIFIED-OVER-TAILSCALE` (2026-07-01) | cross-machine collab **WIRE + verified-peer-JOIN + explicit-ADMIT** over a real network (Phase 5, **F0–F3**) | DONE on real hardware, **two OSes / two verified sandboxes**: Windows HOST (`100.82.212.113`) + cofounder's **macOS** PEER (sandbox-exec, `ok=true`) over **Tailscale**. Fail-closed off-loopback bind proven LIVE — bound to `100.82.212.113` ONLY (`netstat` shows the tailnet IP, not `0.0.0.0`; `127.0.0.1:8474` refused). The Mac dialed across the tailnet, self-tested VERIFIED, **parked on the token** (`routable=false`), and became `routable` ONLY on the host's **explicit admit**; `disable` closed the off-loopback listener (port refused after). Consent line RECORDED in `daemon.log` (fixed: was `console.warn`, silently discarded under the daemon's `stdio:'ignore'` — a consent line nobody can see is no consent line). **Kept DISTINCT:** proven = wire + trust state machine + admission across machines; NOT proven = a real task actually dispatched down the wire (the `--mock` round-trip through the daemon needs the DISPATCH seam next) |
+| `DEFERRED` (collab — engine→dispatch) | **the LAST unwired seam** (Phase 5): the daemon's workflow engine actually DISPATCHING a task to an admitted, routable collab peer. `makeCollabAdapter`/`registerPeerAdapter` + the full round-trip (pack → push → quarantine → host-git re-derive → re-gate → manifest) are PROVEN over a real socket in **Wire D**, but have **ZERO production callers** — the StageRunner has no collab dispatch path, so admitting a peer makes him `routable` in STATE yet no task is ever routed to him. This is the **most security-sensitive path in the system** (it routes work to an UNTRUSTED remote peer) ⇒ gets its own plan + review + green gate, never a mid-session hack | build the StageRunner→collab registration + routing; then a live `--mock` round-trip THROUGH THE DAEMON shows a real task cross the wire (needs a second machine again) |
+| `DEFERRED` (collab — jail-over-wire) | a peer GENUINELY jailing the host's task *over the wire* (Phase 5). The Wire D happy-path peer used a test SEAM (`confiningBackend`), NOT a real jail — it proves the wire + quarantine flow, not confinement-over-the-wire | run the peer-agent on a box with a VERIFIED jail — WSL/Linux (bubblewrap, VERIFIED-ON-LINUX) **or macOS (sandbox-exec, VERIFIED-ON-MACOS — the entrypoint now EXISTS)** — so its REAL jail confines a task arriving over the real socket (needs the DISPATCH seam above) |
+| `DEFERRED` (collab — real-provider) | a REAL provider (Claude/Codex/Gemini) executing a peer's task over the wire with real tokens (Phase 5). The wire tests + the first live round-trip run the peer in `--mock` (deterministic, zero cost) | a capped `--live` collab smoke: a real CLI runs a peer's task end to end over the socket (needs the DISPATCH seam above) |
 | `DEFERRED-PENDING-TOOLCHAIN` | the native Tauri `tauri build` + packaged-app runtime smoke (Phase 6) | on a Rust box: build the shell, confirm the window truly loads `127.0.0.1:8473`, the CSP is enforced by the webview, and the sidecar truly reuses the daemon (the config-lint proves the locked-down intent, not the running app) |
 | `DEFERRED` (no target) | the per-domain network-allowlist filtering proxy (Phase 5) | n/a — only `network:none` is jail-enforceable, so `network:allowlist` stays Claude-pinned |
 
@@ -375,9 +376,13 @@ Until each is run-and-passed on real hardware, its subject stays at the safe pos
 provider mapping = the mock's assumption, not a proof). Nothing below is overclaimed. **Two items have now
 cleared their gate: `DEFERRED-PENDING-LINUX` → `VERIFIED-ON-LINUX` and `DEFERRED-PENDING-MACOS` →
 `VERIFIED-ON-MACOS` (both 2026-06-30)** — the real bubblewrap jail confined on a real kernel, and the
-real sandbox-exec jail confined on real macOS hardware (details below). The macOS verification surfaced a
-new, NAMED gap kept distinct from it: there is no peer-agent entrypoint yet, so a sandbox-verified macOS
-box still cannot join a real pool outside the test harness.
+real sandbox-exec jail confined on real macOS hardware (details below). **A third has now cleared its gate:
+`DEFERRED-PENDING-MULTI-MACHINE` (the cross-machine wire + verified-peer-join + admit) → `VERIFIED-OVER-TAILSCALE`
+(2026-07-01)** — a real macOS peer joined a Windows host over Tailscale, and the peer-agent entrypoint that
+the macOS verification named as missing now EXISTS (F1). What remains, newly named and kept DISTINCT, is the
+**engine→collab DISPATCH** — the last unwired seam: admitting a peer makes him routable, but no daemon code
+yet routes a task down the wire to him (its own plan + review + green gate, given it is the most
+security-sensitive path in the system).
 
 **Verification surfaced (and fixed) one real defect, the kind only a real kernel reveals:** the net
 self-test originally probed `127.0.0.1` — but every network namespace has its OWN loopback (present even
@@ -429,17 +434,29 @@ Linux nor the macOS jail is deferred any longer (the cross-machine wire still is
   unchanged, so VERIFIED-ON-LINUX is preserved) — the same defect class as the Linux loopback-probe bug. A
   permanent guarded test (`sandbox-exec.test.ts`, `describe.runIf(darwin)`) re-runs the real + hollow cases
   on any macOS box; it skips off-macOS so the Linux/Windows gate is unaffected. **What this does NOT prove:**
-  the collab round-trip over the wire FROM this Mac — there is no peer-agent entrypoint yet (a named deferral
-  above), and a macOS peer genuinely jailing a task over the wire is the jail-over-wire deferral.
-- **DEFERRED-PENDING-MULTI-MACHINE (cross-HOST networking):** the WIRE is now PROVEN two-process-on-one-
-  machine over a real socket — a separate authenticated `ws` endpoint (bound 127.0.0.1 only; off-loopback
-  throws), the join handshake (token → explicit admit), per-frame revoke, and the full round-trip
-  (pack → push → quarantine → host-git re-derive) against a real peer-agent. What stays DEFERRED is real
-  *networking between machines*: NAT/tunnel (cloudflared/ngrok), latency, a genuinely remote peer, and the
-  off-loopback bind. Two further collab items stay deferred and must NOT be read into "the wire is proven":
-  a peer GENUINELY bubblewrap-jailing a task over the wire (the Wire D happy-path used a test SEAM, not a
-  real jail — run it in WSL for the real thing), and a REAL provider executing a peer's task over the wire
-  with real tokens (the wire tests use `--mock`). *First things to run when a second machine is available.*
+  the collab round-trip over the wire FROM this Mac — the peer-agent entrypoint now EXISTS (F1) and a macOS
+  peer has JOINED a host over Tailscale (VERIFIED-OVER-TAILSCALE, 2026-07-01), but a real task DISPATCHED to
+  it (engine→dispatch deferral) and a macOS peer genuinely jailing that task over the wire (jail-over-wire
+  deferral) both remain.
+- **✅ VERIFIED-OVER-TAILSCALE (2026-07-01, cross-HOST wire + join + admit):** the WIRE is now PROVEN
+  cross-machine — a real **macOS** peer dialed a **Windows** host (`100.82.212.113`) over **Tailscale** and
+  completed the join handshake + explicit admit on real hardware. The **fail-closed off-loopback bind**
+  behaved exactly as F2's mutation-proven tests promised: bound to the Tailscale interface ONLY (`netstat`
+  showed `100.82.212.113:8474`, not `0.0.0.0`; `127.0.0.1:8474` refused), consent RECORDED in `daemon.log`,
+  and `disable` closed the listener (port refused after). The peer self-tested VERIFIED (`sandbox.ok=true`,
+  his real sandbox-exec jail), **parked on the token** (`routable=false`), and became routable ONLY on the
+  host's explicit admit — the token-alone-never-authorizes gate held across two machines. Sub-phases
+  F0 (routes drive the socket) / F1 (peer-agent entrypoint, DB-less) / F2 (off-loopback bind) are committed
+  + gate-green. **KEPT DISTINCT — what is NOT proven:** a real task actually DISPATCHED down the wire. The
+  round-trip machinery (pack → push → quarantine → host-git re-derive → re-gate → manifest) is proven over a
+  real socket in Wire D, but has **zero production callers** — the daemon's engine has no collab dispatch
+  path (the `engine→dispatch` deferral above). So the live milestone is *wire + trust + admission across
+  machines*, NOT *a task run on the peer through the daemon*.
+- **Still DEFERRED (cross-HOST, must NOT be read into the above):** the **engine→collab dispatch** seam (the
+  last unwired path — its own plan + review + green gate, as the most security-sensitive route in the
+  system); a peer GENUINELY jailing a real task over the wire (Wire D used a test SEAM, not a real jail —
+  the entrypoint now exists, so this is runnable next); a REAL provider executing a peer's task with real
+  tokens (the wire tests + the first live round-trip use `--mock`); and NAT/tunnel/latency beyond Tailscale.
 - **DEFERRED (no target needed):** the per-domain network-allowlist filtering proxy — `network:none` is
   the only jail-enforceable posture, so a `network:allowlist` policy stays Claude-pinned even sandboxed.
 
