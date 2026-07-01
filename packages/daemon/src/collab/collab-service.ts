@@ -5,7 +5,7 @@ import type { ProviderAdapter } from '@thaloslab/shared';
 import { registerAdapter, unregisterPeerAdapters } from '../providers/adapters';
 import { peerRoutable } from './protocol';
 import { CollabRuntime, collab } from './runtime';
-import { collabBindHost, collabPort } from './wire/bind';
+import { type CollabExposure, collabBindHost, collabPort } from './wire/bind';
 import { CollabEndpoint } from './wire/host-endpoint';
 import type { PeerLink } from './wire/peer-link';
 
@@ -31,11 +31,23 @@ export class CollabService {
     return this.rt.host.invite(peerId);
   }
 
-  /** Host consents to pool → open the listener. Bound 127.0.0.1 (off-loopback throws, see bind.ts). */
-  async enable(opts: { port?: number } = {}): Promise<number> {
+  /**
+   * Host consents to pool → open the listener. Bound 127.0.0.1 by default; `exposure: 'tailnet'` is a
+   * SEPARATE, explicit off-loopback consent that binds to the host's Tailscale interface (or THROWS if
+   * none — never a broader fallback, see bind.ts). An off-loopback bind is LOGGED loudly so it can never
+   * happen silently.
+   */
+  async enable(opts: { port?: number; exposure?: CollabExposure } = {}): Promise<number> {
     this.rt.host.enable();
-    const host = collabBindHost({ active: true });
-    return this.endpoint.start({ host, port: opts.port ?? collabPort() });
+    const host = collabBindHost({ active: true, exposure: opts.exposure });
+    const port = await this.endpoint.start({ host, port: opts.port ?? collabPort() });
+    if (opts.exposure === 'tailnet') {
+      console.warn(
+        `[collab] endpoint bound OFF-LOOPBACK to ${host}:${port} — tailnet exposure ENABLED by ` +
+          'explicit host consent (reachable by admitted, sandbox-verified peers on this tailnet only)',
+      );
+    }
+    return port;
   }
 
   /** Collab off → blanket-revoke every session, close the listener, and drop every pooled provider. */

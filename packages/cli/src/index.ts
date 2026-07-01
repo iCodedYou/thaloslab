@@ -14,15 +14,17 @@ interface CliFlags {
   live?: boolean;
   mock?: boolean;
   collab?: boolean;
+  collabTailnet?: boolean; // OFF-LOOPBACK exposure — a DISTINCT, stronger consent than --collab
   menu?: boolean; // --no-menu => false
   open?: boolean; // --no-open => false
 }
 
 async function run(flags: CliFlags): Promise<void> {
   let mode: ExecutionMode = flags.live ? 'live' : flags.mock ? 'mock' : 'preview';
-  let collab = Boolean(flags.collab);
+  const tailnet = Boolean(flags.collabTailnet);
+  let collab = Boolean(flags.collab) || tailnet; // tailnet exposure implies collab (pool consent)
 
-  const flagsProvided = Boolean(flags.live || flags.mock || flags.collab);
+  const flagsProvided = Boolean(flags.live || flags.mock || flags.collab || flags.collabTailnet);
   if (flags.menu !== false && !flagsProvided) {
     const choices = await runMenu({ mode, collab });
     if (!choices) return;
@@ -38,7 +40,12 @@ async function run(flags: CliFlags): Promise<void> {
 
     const providers = await fetchProviders(result.port);
     p.log.info(`Providers: ${formatProviders(providers)}`);
-    if (collab) p.log.info('Collab pooling: enabled');
+    if (tailnet)
+      p.log.warn(
+        'Collab TAILNET exposure requested: OFF-LOOPBACK (this host’s Tailscale 100.x address). ' +
+          'Enable it explicitly from the Collab tab — it binds off-loopback and fails closed if Tailscale is down.',
+      );
+    else if (collab) p.log.info('Collab pooling: enabled (loopback)');
 
     if (flags.open === false) {
       p.outro(result.url);
@@ -81,7 +88,11 @@ program
   .version('0.0.0')
   .option('--live', 'real provider invocation and repo writes')
   .option('--mock', 'dev-only: fully stubbed providers, zero token spend')
-  .option('--collab', 'enable collab pooling')
+  .option('--collab', 'enable collab pooling (loopback)')
+  .option(
+    '--collab-tailnet',
+    'request OFF-LOOPBACK collab exposure on this host’s Tailscale interface',
+  )
   .option('--no-menu', 'skip the interactive menu')
   .option('--no-open', 'do not open the browser')
   .action((opts: CliFlags) => run(opts));

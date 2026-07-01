@@ -22,6 +22,14 @@ export function registerCollabRoutes(app: FastifyInstance): void {
     return { ...collabService.state(), collabPort: collabService.endpoint.port };
   });
 
+  // OFF-LOOPBACK consent — a DISTINCT route from /enable (never a body flag on the loopback path), so
+  // tailnet exposure can never be toggled by accident. Binds to the host's Tailscale interface or FAILS
+  // CLOSED (no listener) if none is found. The service logs the off-loopback bind loudly.
+  app.post('/api/collab/enable-tailnet', async () => {
+    if (!collabService.endpoint.listening) await collabService.enable({ exposure: 'tailnet' });
+    return { ...collabService.state(), collabPort: collabService.endpoint.port };
+  });
+
   app.post('/api/collab/disable', async () => {
     await collabService.disable(); // revokes every session AND closes the listener (port released)
     return { ...collabService.state(), collabPort: collabService.endpoint.port };
