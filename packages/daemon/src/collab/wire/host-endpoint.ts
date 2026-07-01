@@ -25,12 +25,18 @@ function send(socket: WebSocket, frame: HostToPeer): void {
 
 export class CollabEndpoint {
   private wss: WebSocketServer | null = null;
+  private boundPort: number | null = null;
   private readonly conns = new Map<string, PeerConn>();
 
   constructor(private readonly deps: EndpointDeps) {}
 
   get listening(): boolean {
     return this.wss !== null;
+  }
+
+  /** The port the listener is bound to (null when not listening) — for the API/UI to surface. */
+  get port(): number | null {
+    return this.boundPort;
   }
 
   start(opts: { host: string; port: number }): Promise<number> {
@@ -43,7 +49,8 @@ export class CollabEndpoint {
         wss.off('error', reject);
         this.wss = wss;
         const addr = wss.address();
-        resolve(typeof addr === 'object' && addr ? addr.port : opts.port);
+        this.boundPort = typeof addr === 'object' && addr ? addr.port : opts.port;
+        resolve(this.boundPort);
       });
     });
   }
@@ -166,6 +173,7 @@ export class CollabEndpoint {
     for (const peerId of [...this.conns.keys()]) this.sever(peerId, 'collab disabled');
     const wss = this.wss;
     this.wss = null;
+    this.boundPort = null;
     if (!wss) return;
     await new Promise<void>((resolve) => wss.close(() => resolve()));
   }
