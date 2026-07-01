@@ -362,18 +362,22 @@ away). *Refines SPEC §4 / §13 / §15.*
 | ✅ `VERIFIED-ON-INSTALL` (2026-06-30, **mostly**) | Codex/Gemini real `enforce()` mapping + stream-parser conformance (Phase 3) | DONE for the safety-critical core, against codex-cli **0.142.2** + gemini **0.49.0**: both `enforce()` mappings checked vs real `--help` + reality tests; reconstructed mistakes FOUND + FIXED — codex `--ask-for-approval` (rejected by exec) removed; codex network:none made EXPLICIT (`-c sandbox_workspace_write.network_access=false`) instead of a user-overridable default (too-loose); gemini `--exclude-tools` (DOES NOT EXIST — exit 1) replaced with `--approval-mode plan`/`yolo` + `--skip-trust`; gemini `network-none` now UNMET for builders (too-loose — web tools weren't actually disablable); gemini `--output-format stream-json` adopted. Codex parser VERIFIED vs a real capture. The cross-vendor ROUTING is verified deterministically (`cross-provider.test.ts`). **STILL DEFERRED (4 sub-items):** (a) `codex-on-PATH` — codex installs OFF-PATH (`~/AppData/Local/OpenAI/Codex/bin/<hash>`) so `whichSync` can't detect it; (b) `gemini-stream-recapture` — the assistant/result stream event is INFERRED (gemini API 503s blocked a clean capture); (c) gemini per-command allowlist via the Policy Engine (`--policy`) — kept UNMET/strict, not built; (d) `live-xvendor-handoff` — a real claude-builds→codex-reviews `--live` run was NOT reached (the bug-fix `repro`/test-author stage doom-loops under live ×3 before the reviewer; the feature workflow has no reviewer) |
 | ✅ `VERIFIED-BUDGET` (2026-06-30) | the `--live` greenfield smoke (Phase 4) — **RAN, one real spec** | DONE: a capped `--live` run (real Claude, `scripts/smoke-greenfield.ts`) on a small spec (`wc-lite`, a minimal `wc`) reached `done` in **5 invokes / 81.4k tokens / 2.6 min / 2 lanes** — well under every cap (12/300k/15min/2). The architect invented structure and decomposed into **2 genuinely PATH-disjoint lanes** (`src/count.js` vs `bin/wc-lite.js`+`package.json`) that ran as parallel seam worktrees — NOT collapsed to one. The MVP is BUILDABLE: `printf 'hello world\n' \| node bin/wc-lite.js` → `1 2 12` (acceptance met); `main` was never touched; integration-sweep gated `done`. Nuance (real-world messiness, MVP still correct): the CLI lane **inlined** its own counting logic instead of importing the lane-0 contract, and the scaffold left orphan stubs (`count.js`/`cli.js`) — so path-disjoint held, but logic-DRY did not. **One run, not a guarantee every greenfield holds.** |
 | ✅ `VERIFIED-ON-LINUX` (2026-06-30) | real bubblewrap confinement (Phase 5) — **VERIFIED** | DONE: the real self-test's escape probe was genuinely DENIED on kernel `6.18.33.2-microsoft-standard-WSL2` + bubblewrap 0.11.1 — fs by host-readback, net by `ENETUNREACH` under `--unshare-net` ⇒ `selfTest().ok=true`; the router relaxation then un-pinned a Codex builder, while Noop re-pinned to Claude. See "Phase 5 sandbox — VERIFIED-ON-LINUX" below |
-| `DEFERRED-PENDING-MACOS` | sandbox-exec/Lima (not yet implemented) (Phase 5) | the same self-test on macOS |
+| ✅ `VERIFIED-ON-MACOS` (2026-06-30) | native macOS **sandbox-exec (Seatbelt)** confinement (Phase 5) — **VERIFIED** | DONE on **macOS 26.3 (build 25D125) / arm64 (Apple M4 Pro)**: the real self-test's escape probe was genuinely DENIED on both axes — fs by host-readback (a write to a HOST path OUTSIDE the rw set returned `EPERM` and never reached the host file), net by `EPERM` at the socket under `(deny network*)` — ⇒ `selfTest().ok=true`; a hollow/toothless `(allow default)` profile still ESCAPES ⇒ `ok=false` (the verifier does not rubber-stamp the binary's presence). The Linux-shaped net-blocked errno set was extended (DARWIN-GUARDED) to recognize Seatbelt's `EPERM`/`EACCES` syscall denial — same defect class as the Linux loopback-probe bug, fixed the same way. Exact invocation: `sandbox-exec -p '<SBPL profile>' <cmd> <args>`. Guarded test `sandbox-exec.test.ts` (`describe.runIf(darwin)`) re-runs it; skips off-macOS. See "Phase 5 sandbox — VERIFIED-ON-MACOS" below |
+| `DEFERRED` (collab — peer-agent entrypoint) | a runnable peer-agent PROCESS (Phase 5). `connectPeer`/`buildPeerHello`/`runPeerInvoke` exist and are exercised in-test, but there is NO production bin/entrypoint that boots a standalone peer-agent, dials a host URL+token, and serves invokes — so a (now sandbox-verified) macOS box cannot yet join a real pool outside the test harness. This is the next step after the verified backend, kept DISTINCT from it | a `thaloslab` peer entrypoint that constructs the hello, dials the host, and serves `runPeerInvoke`, joined against a live host |
 | `DEFERRED-PENDING-MULTI-MACHINE` | **cross-HOST** collab networking — NAT/tunnel (cloudflared/ngrok)/latency/a genuinely remote peer + the off-loopback bind (Phase 5). The WIRE itself (transport + protocol + trust state machine) is now PROVEN two-process-on-one-machine over a real socket; what remains is real *networking* between machines | a real second machine joins over the tunnel and runs the collab suite; the off-loopback bind opt-in implemented + reviewed |
-| `DEFERRED` (collab — jail-over-wire) | a peer GENUINELY bubblewrap-jailing the host's task *over the wire* (Phase 5). The Wire D happy-path peer used a test SEAM (`confiningBackend`), NOT a real jail — it proves the wire + quarantine flow, not confinement-over-the-wire | run the peer-agent in WSL (the daemon stack on Linux) so its REAL bubblewrap jail (VERIFIED-ON-LINUX) confines a task arriving over the real socket |
+| `DEFERRED` (collab — jail-over-wire) | a peer GENUINELY jailing the host's task *over the wire* (Phase 5). The Wire D happy-path peer used a test SEAM (`confiningBackend`), NOT a real jail — it proves the wire + quarantine flow, not confinement-over-the-wire | run the peer-agent on a box with a VERIFIED jail — WSL/Linux (bubblewrap, VERIFIED-ON-LINUX) **or now macOS (sandbox-exec, VERIFIED-ON-MACOS)** — so its REAL jail confines a task arriving over the real socket (needs the peer-agent entrypoint above) |
 | `DEFERRED` (collab — real-provider) | a REAL provider (Claude/Codex/Gemini) executing a peer's task over the wire with real tokens (Phase 5). The wire tests run the peer in `--mock` (deterministic, zero cost) | a capped `--live` collab smoke: a real CLI runs a peer's task end to end over the socket |
 | `DEFERRED-PENDING-TOOLCHAIN` | the native Tauri `tauri build` + packaged-app runtime smoke (Phase 6) | on a Rust box: build the shell, confirm the window truly loads `127.0.0.1:8473`, the CSP is enforced by the webview, and the sidecar truly reuses the daemon (the config-lint proves the locked-down intent, not the running app) |
 | `DEFERRED` (no target) | the per-domain network-allowlist filtering proxy (Phase 5) | n/a — only `network:none` is jail-enforceable, so `network:allowlist` stays Claude-pinned |
 
 Until each is run-and-passed on real hardware, its subject stays at the safe posture already in place
 (an unverified jail = NoopSandbox-equivalent → no router relaxation, collab fail-closed; an unverified
-provider mapping = the mock's assumption, not a proof). Nothing below is overclaimed. **One item has now
-cleared its gate: `DEFERRED-PENDING-LINUX` → `VERIFIED-ON-LINUX` (2026-06-30)** — the real bubblewrap
-jail genuinely confined on a real kernel (details below).
+provider mapping = the mock's assumption, not a proof). Nothing below is overclaimed. **Two items have now
+cleared their gate: `DEFERRED-PENDING-LINUX` → `VERIFIED-ON-LINUX` and `DEFERRED-PENDING-MACOS` →
+`VERIFIED-ON-MACOS` (both 2026-06-30)** — the real bubblewrap jail confined on a real kernel, and the
+real sandbox-exec jail confined on real macOS hardware (details below). The macOS verification surfaced a
+new, NAMED gap kept distinct from it: there is no peer-agent entrypoint yet, so a sandbox-verified macOS
+box still cannot join a real pool outside the test harness.
 
 **Verification surfaced (and fixed) one real defect, the kind only a real kernel reveals:** the net
 self-test originally probed `127.0.0.1` — but every network namespace has its OWN loopback (present even
@@ -389,18 +393,19 @@ timeout/unknown) is reachable → fail-closed. Re-run ⇒ `ok=true`.
 
 The trust LOGIC is proven on the Windows build machine (self-test decision logic, router relaxation,
 the three collab axes via an in-process mock peer). The Linux jail's **REAL confinement is now VERIFIED**
-(2026-06-30, above); macOS confinement and the REAL cross-machine wire remain deferred behind
+(2026-06-30, above); **macOS confinement is now also VERIFIED** (2026-06-30, sandbox-exec on macOS 26.3 /
+arm64 — below). The REAL cross-machine wire (and a peer genuinely jailing over it) remain deferred behind
 self-tests/mocks that run **for real on-target before trust** — exactly like Phase 3's
-deferred-pending-install. A reader must not mistake a *deferred* jail for a verified one — and the Linux
-one is no longer deferred.
+deferred-pending-install. A reader must not mistake a *deferred* jail for a verified one — and neither the
+Linux nor the macOS jail is deferred any longer (the cross-machine wire still is).
 
 **Cross-platform sandbox — what is verified vs deferred:**
 
 | OS | Backend | Verified on hardware? | Status |
 |---|---|---|---|
 | Linux | bubblewrap (rootless userns) — **implemented** | **YES** — kernel 6.18.x WSL2 + bwrap 0.11.1 (2026-06-30) | ✅ **VERIFIED-ON-LINUX** |
-| macOS | sandbox-exec / Lima — not yet implemented | No | **DEFERRED-PENDING-MACOS** |
-| Windows (this box) | WSL2 / Docker — neither present → **NoopSandbox** | n/a (no real jail) | local unsandboxed (DiD floor), collab fail-closed |
+| macOS | sandbox-exec (Seatbelt) — **implemented** | **YES** — macOS 26.3 / arm64 (Apple M4 Pro) (2026-06-30) | ✅ **VERIFIED-ON-MACOS** |
+| Windows (build box) | WSL2 / Docker — neither present → **NoopSandbox** | n/a (no real jail) | local unsandboxed (DiD floor), collab fail-closed |
 
 - **VERIFIED-ON-LINUX (2026-06-30):** the real bubblewrap jail's confinement was proven on a real Linux
   kernel (WSL2 6.18.x, bubblewrap 0.11.1, unprivileged userns available — `bwrap --ro-bind / / --unshare-all
@@ -410,8 +415,22 @@ one is no longer deferred.
   test (`backends.test.ts`, `describe.runIf(linux+bwrap)`) re-runs this on any Linux box; it skips off-Linux
   so the Windows gate is unaffected. The exact jail flags: `bwrap --die-with-parent --new-session --unshare-{user,pid,ipc,uts}
   --ro-bind / / --tmpfs /tmp --proc /proc --dev /dev --bind <rw> <rw> --unshare-net`.
-- **DEFERRED-PENDING-MACOS:** the future sandbox-exec/Lima jail's REAL confinement — the same self-test on
-  macOS. Until then: present-but-unverified ⇒ treated as Noop (no relaxation, collab fail-closed).
+- **VERIFIED-ON-MACOS (2026-06-30):** the native macOS sandbox-exec (Seatbelt) jail's confinement was proven
+  on real hardware — **macOS 26.3 (build 25D125), arm64 (Apple M4 Pro)**. The backend compiles a SBPL
+  profile (`(allow default)` with two teeth: `(deny file-write*)` re-allowing only the rw subpaths + the
+  /dev nodes, and `(deny network*)` for `network:none`) and runs `sandbox-exec -p '<profile>' <cmd> <args>`.
+  The real self-test genuinely DENIED both escapes — fs by host-readback (the probe's write to a HOST path
+  outside the rw set returned `EPERM` and never reached the host file: `selfWrote:false`), net by `EPERM`
+  at the socket under `(deny network*)` (`connectedOut:false`) — ⇒ `selfTest().ok=true, fsBlocked, netBlocked`.
+  The verifier still FAILS on a non-confining jail: a hollow `(allow default)` profile lets the probe escape
+  (`selfWrote:true, connectedOut:true`) ⇒ `ok=false`. The self-test's net-blocked errno set was Linux-shaped
+  (no-route codes only); Seatbelt denies at the `socket()` syscall with `EPERM`/`EACCES`, so those are now
+  recognized DARWIN-ONLY (`netBlockedCodes('darwin')` ⊋ `netBlockedCodes('linux')`; the Linux set is
+  unchanged, so VERIFIED-ON-LINUX is preserved) — the same defect class as the Linux loopback-probe bug. A
+  permanent guarded test (`sandbox-exec.test.ts`, `describe.runIf(darwin)`) re-runs the real + hollow cases
+  on any macOS box; it skips off-macOS so the Linux/Windows gate is unaffected. **What this does NOT prove:**
+  the collab round-trip over the wire FROM this Mac — there is no peer-agent entrypoint yet (a named deferral
+  above), and a macOS peer genuinely jailing a task over the wire is the jail-over-wire deferral.
 - **DEFERRED-PENDING-MULTI-MACHINE (cross-HOST networking):** the WIRE is now PROVEN two-process-on-one-
   machine over a real socket — a separate authenticated `ws` endpoint (bound 127.0.0.1 only; off-loopback
   throws), the join handshake (token → explicit admit), per-frame revoke, and the full round-trip
@@ -499,6 +518,6 @@ For the handoff, the points where this file supersedes a `SPEC.md` default:
 - **§7** — gates are real or convert to a blocking human gate (no silent no-op, #24); roster + gate-config assembled from triage data, not hardcoded per template; merge-conflict posture bounded-auto-resolve + blast-radius-escalates (#23); greenfield gating is ABSOLUTE (gate commands read from the worktree; integration-sweep is the MVP-exists gate with teeth); the MVP never auto-lands on `main` (#27). The `--live` greenfield smoke is **VERIFIED-BUDGET** (above — one capped run: a real architect invented a buildable MVP + 2 path-disjoint parallel lanes under the caps).
 - **§9** — isolation is the lane model (one branch+worktree+gate-state per lane; sequential shared, fan-out isolated, #22); the integrator merges into `thalos/integration` only, never the default branch; conflict orchestration with the works-alone-breaks-together backstop (#23).
 - **§11** — collab is a THREE-legged threat model (#29): executor-sandbox / host-gates+quarantine+differ-by-vendor / one-way data-confidentiality (minimize+inform, residual accepted); token + explicit human admit + revoke; creds never cross. The WIRE (separate authenticated `ws` endpoint, bound 127.0.0.1-only/off-loopback-throws; join→admit→revoke; pack→push→quarantine→host-git re-derive) is PROVEN two-process-on-one-machine over a real socket; cross-HOST networking + a peer genuinely jailing over the wire + a real provider over the wire stay DEFERRED-PENDING-MULTI-MACHINE (above).
-- **§14** — the OS sandbox is the 4th, outermost defense-in-depth layer making pathScope+network:none REAL; "verified" = a real escape was DENIED (self-test, host-readback), never "binary present"; local = sandbox-when-available, collab = sandbox-REQUIRED fail-closed (#28). Linux (bubblewrap) real confinement is **VERIFIED-ON-LINUX** (2026-06-30: fs denied by host-readback, net by `ENETUNREACH` under `--unshare-net`); macOS stays DEFERRED-PENDING-MACOS; per-domain network-allowlist deferred (only network:none is jail-enforceable).
+- **§14** — the OS sandbox is the 4th, outermost defense-in-depth layer making pathScope+network:none REAL; "verified" = a real escape was DENIED (self-test, host-readback), never "binary present"; local = sandbox-when-available, collab = sandbox-REQUIRED fail-closed (#28). Linux (bubblewrap) real confinement is **VERIFIED-ON-LINUX** (2026-06-30: fs denied by host-readback, net by `ENETUNREACH` under `--unshare-net`) and macOS (sandbox-exec) is **VERIFIED-ON-MACOS** (2026-06-30, macOS 26.3 / arm64: both escapes denied with `EPERM`, hollow profile still fails); the collab peer-agent entrypoint + the over-the-wire round-trip from a verified box stay DEFERRED; per-domain network-allowlist deferred (only network:none is jail-enforceable).
 - **§15** — OS sandboxing gates Phase 5 (ships with collab), not Phase 6.
 - **CLAUDE.md** — gate toolchain pinned (Vitest/ESLint/tsc/Prettier) + aggregate `gate` + pre-commit hook (#16); migrate full schema up front, repositories only for tables a phase uses (#19).

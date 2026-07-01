@@ -833,13 +833,16 @@ The app runs AI agents that execute code on the user's machine, so safety is fir
 > **Sandbox confinement — Linux now VERIFIED:** the real bubblewrap jail genuinely confined on a real
 > kernel (2026-06-30, WSL2 6.18.x + bubblewrap 0.11.1) — the self-test's escape probe was DENIED on both
 > axes (fs by host-readback, net by `ENETUNREACH` under `--unshare-net`) ⇒ `selfTest().ok=true`, and the
-> router relaxation un-pinned a Codex builder. **VERIFIED-ON-LINUX.** macOS (sandbox-exec) stays
-> DEFERRED-PENDING-MACOS.
+> router relaxation un-pinned a Codex builder. **VERIFIED-ON-LINUX.** macOS (sandbox-exec) is **now also
+> VERIFIED-ON-MACOS** (2026-06-30, macOS 26.3 / arm64): the real Seatbelt jail DENIED both escapes (fs by
+> host-readback → `EPERM`, net by `EPERM` at the socket under `(deny network*)`) ⇒ `selfTest().ok=true`,
+> and a hollow profile still fails the verifier (`ok=false`). Exact invocation `sandbox-exec -p '<profile>' …`.
 >
-> **Still DEFERRED, named (run for real on-target before trust):** macOS sandbox-exec confinement →
-> DEFERRED-PENDING-MACOS; the real cross-machine collab wire → DEFERRED-PENDING-MULTI-MACHINE (a verified
-> local jail does NOT prove the network transport; the in-process mock peer proves only the trust logic);
-> the per-domain network-allowlist filtering proxy → DEFERRED.
+> **Still DEFERRED, named (run for real on-target before trust):** a runnable **peer-agent entrypoint** (the
+> verified-jail backend exists, but no production process boots a peer + dials a host yet → DEFERRED); the
+> real cross-machine collab wire → DEFERRED-PENDING-MULTI-MACHINE (a verified local jail does NOT prove the
+> network transport; the in-process mock peer proves only the trust logic); a peer genuinely jailing a task
+> over the wire → DEFERRED (jail-over-wire); the per-domain network-allowlist filtering proxy → DEFERRED.
 
 ---
 
@@ -851,16 +854,18 @@ Built using the very methodology the app implements: phased, verification-anchor
 > proven deterministically (`pnpm gate`) plus, where applicable, a real `--live` smoke. **\*The
 > asterisk is load-bearing:** what could not be verified on the build machine is **named and deferred
 > behind an on-target pre-trust gate**, never silently claimed "done" (see [DECISIONS](DECISIONS.md)
-> "Deferred / open items" for the single consolidated list). **Two gates have now CLEARED:**
+> "Deferred / open items" for the single consolidated list). **Three gates have now CLEARED:**
 > `DEFERRED-PENDING-LINUX` → `VERIFIED-ON-LINUX` (2026-06-30 — the real bubblewrap jail genuinely confined
-> on a real kernel; the relaxation un-pinned Codex) and `DEFERRED-PENDING-BUDGET` → `VERIFIED-BUDGET`
+> on a real kernel; the relaxation un-pinned Codex), `DEFERRED-PENDING-MACOS` → `VERIFIED-ON-MACOS`
+> (2026-06-30 — the real sandbox-exec jail confined on macOS 26.3 / arm64; both escapes denied with `EPERM`,
+> hollow profile still fails), and `DEFERRED-PENDING-BUDGET` → `VERIFIED-BUDGET`
 > (2026-06-30 — one capped `--live` greenfield run produced a buildable MVP + 2 path-disjoint parallel lanes
 > in 5 invokes/81.4k tok/2.6min). The **collab WIRE** is also now PROVEN two-process-on-one-machine over a
 > real socket (Wire A–D). `DEFERRED-PENDING-INSTALL` is now **mostly VERIFIED-ON-INSTALL** (Codex 0.142.2
 > + Gemini 0.49.0: both `enforce()` mappings verified vs the real CLIs — two too-loose containment holes
 > fixed — codex parser re-captured), with a few named sub-items still deferred (codex-on-PATH detection,
 > gemini stream re-capture, gemini Policy-Engine allowlist, the live cross-vendor handoff). **Deferred items
-> remaining:** `DEFERRED-PENDING-MACOS` (macOS sandbox-exec), `DEFERRED-PENDING-MULTI-MACHINE` (cross-HOST
+> remaining:** the collab **peer-agent entrypoint** (no runnable peer process yet), `DEFERRED-PENDING-MULTI-MACHINE` (cross-HOST
 > collab networking + a peer jailing over the wire + a real provider over the wire), `DEFERRED-PENDING-TOOLCHAIN`
 > (the native Tauri build), the per-domain network-allowlist proxy, and the `DEFERRED-PENDING-INSTALL`
 > sub-items above. The full SPEC §15 roadmap is built and logic-proven; three gates are now (mostly)

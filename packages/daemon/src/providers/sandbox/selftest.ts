@@ -37,9 +37,29 @@ export interface ProbeOutcome {
 // namespace from the host (verified on a real Linux kernel — DEFERRED-PENDING-LINUX). We use TEST-NET-1
 // (192.0.2.1, RFC 5737 documentation space): no real host is ever contacted — when net is denied the
 // kernel returns a no-route error IMMEDIATELY (isolated), and when net is present the SYN dies unrouted
-// (timeout). Only the no-route codes prove isolation; CONNECT / refused / reset / unknown / timeout all
-// mean the stack was REACHABLE ⇒ connectedOut:true (fail-closed: never claim an isolation we didn't see).
-const PROBE_SRC = `
+// (timeout). The codes that count as a GENUINE denial are PER-OS (see netBlockedCodes): on Linux only
+// the no-route codes prove isolation; CONNECT / refused / reset / unknown / timeout all mean the stack
+// was REACHABLE ⇒ connectedOut:true (fail-closed: never claim an isolation we didn't see).
+const NET_BLOCKED_BASE = ['ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'EADDRNOTAVAIL'];
+
+/**
+ * Errno codes that count as a GENUINE outbound-network denial, per OS. Base = the Linux no-route codes
+ * (a network namespace with no route returns these). macOS Seatbelt denies at the `socket()` syscall
+ * ITSELF with EPERM/EACCES (not a routing error), so those are recognized DARWIN-ONLY — the Linux set is
+ * UNCHANGED, so the VERIFIED-ON-LINUX verdict is preserved. This is the same class of fix as the Linux
+ * loopback-probe defect: a real jail whose denial the verifier did not recognize. Any OTHER outcome
+ * (CONNECT / refused / reset / timeout / unknown) still means the stack was REACHABLE ⇒ not blocked.
+ */
+export function netBlockedCodes(platform: string): string[] {
+  return platform === 'darwin' ? [...NET_BLOCKED_BASE, 'EPERM', 'EACCES'] : [...NET_BLOCKED_BASE];
+}
+
+// The probe source. NET_BLOCKED is baked in from netBlockedCodes(process.platform) at generation time —
+// runEscapeProbe runs on the SAME host (and OS) the sandboxed probe runs on, so the host's codes are the
+// probe's codes. (Generating instead of branching inside the probe keeps the verdict logic exported and
+// unit-testable in both directions.)
+function buildProbeSrc(): string {
+  return `
 import fs from 'node:fs';
 import net from 'node:net';
 const out = { selfWrote: false, connectedOut: false, fsErr: '', netErr: '' };
@@ -48,12 +68,13 @@ const token = process.env.THALOS_PROBE_TOKEN || 'x';
 try { fs.writeFileSync(outside, token); out.selfWrote = true; } catch (e) { out.fsErr = e && e.code ? e.code : String(e); }
 let done = false;
 const finish = () => { if (done) return; done = true; process.stdout.write('PROBE:' + JSON.stringify(out)); process.exit(0); };
-const NET_BLOCKED = ['ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'EADDRNOTAVAIL'];
+const NET_BLOCKED = ${JSON.stringify(netBlockedCodes(process.platform))};
 const s = net.connect({ host: '192.0.2.1', port: 53 });
 s.on('connect', () => { out.connectedOut = true; finish(); });
 s.on('error', (e) => { const c = (e && e.code) || ''; if (NET_BLOCKED.indexOf(c) === -1) out.connectedOut = true; else out.netErr = c; finish(); });
 setTimeout(() => { out.connectedOut = true; finish(); }, 1500);
 `;
+}
 
 interface ProbeReport {
   selfWrote: boolean;
@@ -67,7 +88,7 @@ interface ProbeReport {
 export async function runEscapeProbe(handle: Sandbox): Promise<ProbeOutcome> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thalos-sbx-'));
   const probeFile = path.join(dir, 'probe.mjs');
-  fs.writeFileSync(probeFile, PROBE_SRC, 'utf8');
+  fs.writeFileSync(probeFile, buildProbeSrc(), 'utf8');
   const outside = path.join(os.tmpdir(), `thalos-escape-${process.pid}-${Date.now()}`);
   const token = `ESCAPED-${process.pid}-${Date.now()}`;
   const scope: SandboxScope = { fsScope: { rw: [dir], hideRest: true }, network: 'none' };

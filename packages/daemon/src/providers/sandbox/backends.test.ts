@@ -77,12 +77,14 @@ describe('trust flows ONLY from a passed self-test, never from "the binary is pr
 });
 
 describe('this build machine — honest per-OS state', () => {
-  it('falls back to NoopSandbox here (no Linux/WSL/Docker → no real jail verifiable)', async () => {
-    // No override: detectSandbox uses the platform candidates. On Windows-without-WSL/Docker that set
-    // is empty → NoopSandbox. (On Linux with bwrap installed it would be bubblewrapSandbox.)
+  it('detectSandbox picks the real per-OS candidate when present, else NoopSandbox', async () => {
+    // No override: detectSandbox uses the platform candidates. Linux → bubblewrap (if bwrap present);
+    // macOS → sandbox-exec (always present); Windows-without-WSL/Docker → the empty set → NoopSandbox.
     const handle = await detectSandbox();
     if (process.platform === 'linux') {
       expect(['bubblewrap', 'noop']).toContain(handle.id);
+    } else if (process.platform === 'darwin') {
+      expect(['sandbox-exec', 'noop']).toContain(handle.id);
     } else {
       expect(handle).toBe(noopSandbox);
     }

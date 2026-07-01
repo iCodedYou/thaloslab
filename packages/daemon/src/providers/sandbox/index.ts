@@ -1,5 +1,6 @@
 // Sandbox resolution + the self-test cache. Phase 5a wires the abstraction + the fail-closed math; the
-// real per-OS jails (bubblewrap/sandbox-exec/wsl2) arrive in 5b behind `detectSandbox`. Until then the
+// real per-OS jails arrive in 5b behind `detectSandbox` — bubblewrap (VERIFIED-ON-LINUX), sandbox-exec
+// (VERIFIED-ON-MACOS); Windows (WSL2/Docker) is still DEFERRED. On a platform with no backend the
 // platform sandbox is the NoopSandbox → selfTest ok:false → local runs unsandboxed (defense in depth,
 // the documented floor), collab refuses (fail-closed).
 import type {
@@ -12,6 +13,7 @@ import type {
 } from '@thaloslab/shared';
 import { bubblewrapSandbox } from './bubblewrap';
 import { noopSandbox } from './noop';
+import { sandboxExecSandbox } from './sandbox-exec';
 
 let override: Sandbox | null = null;
 
@@ -27,11 +29,13 @@ export function resetSandbox(): void {
 
 /** Per-platform jail CANDIDATES, best first. Availability (binary present) is checked here; real
  *  CONFINEMENT is checked later by the self-test — a present-but-misconfigured jail is detected here
- *  but never TRUSTED until its self-test passes. macOS (sandbox-exec/Lima) and Windows (WSL2/Docker)
- *  backends are DEFERRED — on a box without them, candidates() is empty and we fall back to Noop. */
+ *  but never TRUSTED until its self-test passes. Linux = bubblewrap (VERIFIED-ON-LINUX); macOS =
+ *  sandbox-exec (VERIFIED-ON-MACOS). Windows (WSL2/Docker) stays DEFERRED — on a box without a
+ *  candidate, candidates() is empty and we fall back to Noop. */
 function candidates(): Sandbox[] {
   if (process.platform === 'linux') return [bubblewrapSandbox];
-  return []; // macOS/Windows real backends: DEFERRED-PENDING-MACOS / DEFERRED-PENDING-WSL-OR-DOCKER
+  if (process.platform === 'darwin') return [sandboxExecSandbox];
+  return []; // Windows real backends: DEFERRED-PENDING-WSL-OR-DOCKER
 }
 
 /** The platform sandbox: the first AVAILABLE candidate, else NoopSandbox. "Available" = the binary is
