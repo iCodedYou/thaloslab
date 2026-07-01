@@ -7,13 +7,40 @@
 import type { FastifyInstance } from 'fastify';
 import { collabService } from '../../collab/collab-service';
 import { listManifests } from '../../collab/manifest-store';
+import { type Vendor, collabProviderId } from '../../collab/protocol';
+import type { CollabPeerView } from '../../collab/runtime';
 import { getProject } from '../../store/repositories/projects';
+
+export interface CollabTarget {
+  peerId: string;
+  vendor: string;
+  providerId: string;
+}
+
+/** Valid collab dispatch targets: a `collab:<peer>:<vendor>` id per advertised vendor, for currently-
+ *  ROUTABLE peers ONLY. A non-routable peer's vendors are NOT offered — picking one would just PARK at
+ *  dispatch, so it should never be handed to a caller as a valid target. */
+export function collabTargets(peers: CollabPeerView[]): CollabTarget[] {
+  return peers
+    .filter((p) => p.routable)
+    .flatMap((p) =>
+      p.vendors.map((vendor) => ({
+        peerId: p.peerId,
+        vendor,
+        providerId: collabProviderId(p.peerId, vendor as Vendor),
+      })),
+    );
+}
 
 export function registerCollabRoutes(app: FastifyInstance): void {
   app.get('/api/collab', () => ({
     ...collabService.state(),
     collabPort: collabService.endpoint.port,
   }));
+
+  // Discoverability: the valid collab dispatch target ids (`collab:<peer>:<vendor>`) for ROUTABLE peers
+  // only — what a caller may set as a project's `collabTargets.<role>` (H2). Read-only; no new mechanism.
+  app.get('/api/collab/targets', () => collabTargets(collabService.state().peers));
 
   // Host consents to pool → open the LOOPBACK listener (127.0.0.1). Idempotent: a second enable while the
   // socket is already up just returns the current state. Off-loopback exposure is a SEPARATE consent (F2).

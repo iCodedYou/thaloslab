@@ -8,6 +8,8 @@ import path from 'node:path';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { StageOutcome, StageRunner } from '../../workflow/engine';
+import type { CollabPeerView } from '../../collab/runtime';
+import { collabTargets } from './collab';
 
 // Ephemeral collab port — NEVER bind the fixed 8474 in a test (flaky under parallelism).
 process.env.THALOS_COLLAB_PORT = '0';
@@ -113,5 +115,40 @@ describe('collab routes drive the service (the socket actually opens)', () => {
       (await app.inject({ method: 'POST', url: '/api/collab/peers/mac-1/revoke' })).statusCode,
     ).toBe(200);
     await collabService.disable();
+  });
+});
+
+describe('H2 — collab targets: valid ids for ROUTABLE peers only', () => {
+  const peer = (over: Partial<CollabPeerView>): CollabPeerView => ({
+    peerId: 'x',
+    vendors: ['codex'],
+    sandboxOk: true,
+    joinRequested: true,
+    admitted: true,
+    revoked: false,
+    routable: true,
+    ...over,
+  });
+
+  it('derives collab:<peer>:<vendor> per advertised vendor for a ROUTABLE peer', () => {
+    const targets = collabTargets([
+      peer({ peerId: 'r1', vendors: ['codex', 'claude'], routable: true }),
+    ]);
+    expect(targets.map((t) => t.providerId)).toEqual(['collab:r1:codex', 'collab:r1:claude']);
+  });
+
+  it('EXCLUDES a non-routable peer — its ids are never offered (picking one would just PARK)', () => {
+    const targets = collabTargets([
+      peer({ peerId: 'r1', vendors: ['codex'], routable: true }),
+      peer({ peerId: 'n1', vendors: ['codex', 'gemini'], routable: false }), // parked / not admitted
+    ]);
+    expect(targets.map((t) => t.providerId)).toEqual(['collab:r1:codex']);
+    expect(targets.some((t) => t.peerId === 'n1')).toBe(false);
+  });
+
+  it('GET /api/collab/targets returns [] when no peer is routable (200)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/collab/targets' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
   });
 });
