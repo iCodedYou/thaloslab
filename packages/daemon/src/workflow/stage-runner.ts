@@ -19,7 +19,10 @@ import type {
   SandboxCapability,
   Ticket,
 } from '@thaloslab/shared';
+import { makeCollabAdapter } from '../collab/collab-adapter';
 import { collabService } from '../collab/collab-service';
+import type { Vendor } from '../collab/protocol';
+import type { PeerLink } from '../collab/wire/peer-link';
 import { adapterFor, getAdapter, routerCtx as defaultRouterCtx } from '../providers/registry';
 import { type Differ, type RouterCtx, resolveForInvoke } from '../providers/router';
 import { type CollabRoute, projectCollabEnabled, resolveCollabRoute } from './collab-route';
@@ -55,7 +58,7 @@ import {
   mergeResolvePolicy,
   policyFor,
 } from './roster/role-defaults';
-import { executeRun } from './runner';
+import { type RunOutcome, executeRun } from './runner';
 import { errorSignature } from './stuck';
 import {
   type Worktree,
@@ -104,6 +107,9 @@ export interface StageRunnerDeps {
     avoidProvider: ProviderId | undefined,
     ticket: Ticket | null,
   ) => CollabRoute;
+  /** Injectable source of the LIVE PeerLink for a routable collab peer (default: the singleton
+   *  `collabService`). Tests inject their own CollabService's `linkFor` to drive a real loopback socket. */
+  collabLinkFor?: (peerId: string) => PeerLink | null;
 }
 
 /** The engineer's ACTUAL provider for this change — read from the run of the task(s) this one
@@ -123,6 +129,28 @@ function preferredProvider(agent: AgentConfig): ProviderId | undefined {
   return agent.provider === 'auto' ? undefined : (agent.provider as ProviderId);
 }
 
+/** Expand a task's seam (dirs and/or files) into the concrete FILE paths currently under it, for the
+ *  collab context-pack allowlist — `buildContextPack` takes exact relative file paths (a bare dir entry
+ *  can't be read and packs nothing). Keeps the pack allowlist-first (the seam), never whole-repo. Absent
+ *  seam ⇒ undefined (the pack falls back to the lane worktree walk, still never the main repo). */
+function collabPackAllowlist(cwd: string, seamPaths: string[] | undefined): string[] | undefined {
+  if (!seamPaths?.length) return undefined;
+  const files: string[] = [];
+  const add = (rel: string): void => {
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(path.join(cwd, rel));
+    } catch {
+      return;
+    }
+    if (st.isFile()) files.push(rel.replace(/\\/g, '/'));
+    else if (st.isDirectory())
+      for (const e of fs.readdirSync(path.join(cwd, rel))) add(`${rel}/${e}`);
+  };
+  for (const s of seamPaths) add(s);
+  return files;
+}
+
 export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner {
   const now = deps.now ?? (() => Date.now());
   const buildRouterCtx = deps.routerCtx ?? defaultRouterCtx;
@@ -139,6 +167,7 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
           collabService.state().peers.some((p) => p.peerId === peerId && p.routable),
       });
     });
+  const collabLinkFor = deps.collabLinkFor ?? ((peerId: string) => collabService.linkFor(peerId));
   // One worktree per LANE — sequential stages share a lane; parallel fan-out children get distinct
   // lanes (isolated worktrees). The Map is a cache, NOT truth: createWorktree adopts-or-creates so a
   // crash that loses this Map but leaves the lane on disk recovers cleanly.
@@ -468,15 +497,19 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
           output: `collab routing failed closed: ${collab.reason}`,
         };
       }
+      // Collab dispatch target (G0 gates passed). Capture the LIVE link NOW; if the peer was revoked/
+      // disabled between the routability check and here, linkFor is null → FAIL CLOSED (no local fall-back).
+      let collabLink: PeerLink | null = null;
       if (collab.kind === 'collab') {
-        // G1 wires the real dispatch (makeCollabAdapter over the live PeerLink) here. Until then FAIL
-        // CLOSED — a routable target must not silently no-op (and must not fall through to a local run).
-        return {
-          ok: false,
-          escalate: true,
-          changedFiles: [],
-          output: `collab dispatch to ${collab.providerId} is not yet wired (G1)`,
-        };
+        collabLink = collabLinkFor(collab.peerId);
+        if (!collabLink) {
+          return {
+            ok: false,
+            escalate: true,
+            changedFiles: [],
+            output: `collab routing failed closed: peer "${collab.peerId}" link unavailable (revoked/disabled since routing)`,
+          };
+        }
       }
 
       // Phase 5: the platform sandbox + its self-test verdict. Capabilities are platform-level (not
@@ -487,20 +520,25 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       const selfTest = await verifiedSelfTest(sandboxHandle);
       const sbxCaps = selfTest.ok ? sandboxHandle.capabilities() : [];
 
-      const resolution = resolveForInvoke(buildRouterCtx(ticket?.projectId, sbxCaps), {
-        policy,
-        avoidProvider: differ !== 'none' ? avoidProviderFor(ticketId, task) : undefined,
-        differ,
-      });
-      if (resolution.kind === 'park') {
-        return {
-          ok: false,
-          escalate: true,
-          changedFiles: [],
-          output: `provider routing failed closed for ${role}: ${resolution.reason}`,
-        };
+      let providerId: ProviderId;
+      if (collab.kind === 'collab') {
+        providerId = collab.providerId; // resolved by the collab gate; the LOCAL router is bypassed
+      } else {
+        const resolution = resolveForInvoke(buildRouterCtx(ticket?.projectId, sbxCaps), {
+          policy,
+          avoidProvider: differ !== 'none' ? avoidProviderFor(ticketId, task) : undefined,
+          differ,
+        });
+        if (resolution.kind === 'park') {
+          return {
+            ok: false,
+            escalate: true,
+            changedFiles: [],
+            output: `provider routing failed closed for ${role}: ${resolution.reason}`,
+          };
+        }
+        providerId = resolution.provider;
       }
-      const providerId = resolution.provider;
 
       const wt = await ensureWorktree(repoPath, task.laneId);
       if (task.worktreePath !== wt.path) {
@@ -544,7 +582,21 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
       const fanOutNote = stage?.fanOut
         ? `\nWrite a file named "decomposition.json" at the repo root: a JSON array where each element is {"seamPaths": ["dir-or-file", ...], "summary": "..."}. Every lane's seamPaths MUST be DISJOINT from every other lane's (no shared files/dirs). Split only along clean, independent seams; if there is no clean split, return a single element.`
         : '';
-      const provider = adapterFor(providerId, mode);
+      // The adapter: for a collab target, build makeCollabAdapter INLINE over the live link with the
+      // lane's context (the registry can't hold per-run link/seam); otherwise the normal local adapter.
+      // The peer's output is applied in QUARANTINE and re-derived host-side — the security path is the
+      // proven Wire-D flow, unchanged.
+      const provider =
+        collab.kind === 'collab'
+          ? makeCollabAdapter(collabLink as PeerLink, {
+              providerId: collab.vendor as ProviderId, // which of the peer's CLIs to run
+              vendor: collab.vendor as Vendor,
+              repoPath,
+              seamPaths: task.seamPaths,
+              packAllowlist: collabPackAllowlist(wt.path, task.seamPaths),
+              now,
+            })
+          : adapterFor(providerId, mode);
       const opts: InvokeOptions = {
         prompt: `Ticket: ${ticket?.title ?? ''}\nStage: ${task.stageId} (role: ${agent.role}).${seamNote}${fanOutNote}\n${ticket?.body ?? ''}`,
         systemPrompt: agent.systemPrompt,
@@ -554,15 +606,34 @@ export function createProductionStageRunner(deps: StageRunnerDeps): StageRunner 
         mode,
         sandbox,
       };
-      const outcome = await executeRun(provider, opts, {
-        ticketId,
-        taskId: task.id,
-        agentId: task.agentId,
-        provider: providerId,
-        requestedProvider: preferredProvider(agent),
-        bus: deps.bus,
-        now,
-      });
+      let outcome: RunOutcome;
+      try {
+        outcome = await executeRun(provider, opts, {
+          ticketId,
+          taskId: task.id,
+          agentId: task.agentId,
+          provider: providerId,
+          requestedProvider: preferredProvider(agent),
+          bus: deps.bus,
+          now,
+        });
+      } catch (err) {
+        // Surprise 1 — THE security requirement of this seam. The collab adapter THROWS by design on the
+        // security paths: PeerRevokedError (mid-flight revoke, checkpoints 2/3), SecretLeakError (a planted
+        // secret, host-side BEFORE the socket), PeerInvokeTimeoutError. executeRun does NOT catch and the
+        // engine SWALLOWS throws (parallel-lane helper → undefined) — so WITHOUT this catch a security
+        // abort would crash or STRAND the task instead of failing closed. Convert ANY throw into a
+        // failed+escalated outcome; the peer's patch never reaches quarantine.
+        if (collab.kind === 'collab') {
+          return {
+            ok: false,
+            escalate: true,
+            changedFiles: [],
+            output: `collab dispatch failed closed: ${(err instanceof Error ? err.message : String(err)).slice(0, 400)}`,
+          };
+        }
+        throw err; // local adapters yield ok:false by contract — a throw there is a real bug, don't mask it
+      }
 
       // Path-scope audit — the real backstop without a sandbox.
       const audit = await auditScope(repoPath);

@@ -1,7 +1,8 @@
-// G0 — the StageRunner's collab-dispatch short-circuit is WIRED and FAIL-CLOSED, BEFORE any worktree /
-// invoke side effect. The DECISION logic is exhaustively unit-tested in collab-route.test.ts; here we prove
-// the wiring translates a decision correctly: a PARK escalates (never runs), and a would-dispatch (collab)
-// decision fails closed until G1 wires the real dispatch (no silent no-op, no fall-through to a local run).
+// The StageRunner's collab-dispatch short-circuit is WIRED and FAIL-CLOSED, BEFORE any worktree / invoke
+// side effect. The DECISION logic is exhaustively unit-tested in collab-route.test.ts, and the full
+// round-trip + throw-path fail-closed cases in collab-dispatch.test.ts; here we prove the wiring translates
+// a decision correctly: a PARK escalates (never runs), and a collab decision with no live link (peer
+// revoked/absent since routing) fails closed — never a silent no-op, never a fall-through to a local run.
 import os from 'node:os';
 import path from 'node:path';
 import type { WorkflowTemplate } from '@thaloslab/shared';
@@ -81,7 +82,8 @@ describe('StageRunner collab-dispatch short-circuit (fail-closed, no side effect
     expect(outcome.changedFiles).toEqual([]); // no side effect
   });
 
-  it('a would-dispatch (collab) decision FAILS CLOSED until G1 — no silent no-op', async () => {
+  it('a collab decision with NO live link (peer revoked/absent since routing) FAILS CLOSED — no local fall-back', async () => {
+    // Default collabLinkFor → the singleton collabService, where "mac-1" was never admitted → linkFor null.
     const runner = createProductionStageRunner({
       bus: new EventBus(),
       resolveCollab: () => ({
@@ -94,7 +96,8 @@ describe('StageRunner collab-dispatch short-circuit (fail-closed, no side effect
     const outcome = await runner.run({ ticketId: 'tk', task: getTask('collab0')!, template });
     expect(outcome.ok).toBe(false);
     expect(outcome.escalate).toBe(true);
-    expect(outcome.output).toContain('not yet wired');
-    expect(outcome.output).toContain('collab:mac-1:codex');
+    expect(outcome.output).toContain('link unavailable');
+    expect(outcome.output).toContain('mac-1');
+    expect(outcome.changedFiles).toEqual([]); // no side effect
   });
 });
