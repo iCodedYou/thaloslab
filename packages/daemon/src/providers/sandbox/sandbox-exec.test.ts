@@ -31,6 +31,21 @@ describe('seatbelt profile generation (the jail RULES — not a confinement proo
     }
   });
 
+  it('SBPL-escapes a backslash (Windows) path, leaves a POSIX path untouched — escaping is REAL, not incidental', () => {
+    // Deterministic on EVERY OS (no realpath, no host tmpdir): a Windows-style rw path with a backslash
+    // AND a quote must be doubled/escaped so it survives the SBPL double-quoted string literal; a clean
+    // POSIX path (the cofounder's Mac) passes through unescaped. These are the teeth the raw-substring
+    // check lacked — it "passed" on macOS only because tmp paths there happen to contain no backslashes.
+    expect(sbplString('C:\\Users\\dev\\a"b')).toBe('"C:\\\\Users\\\\dev\\\\a\\"b"'); // \ -> \\ , " -> \"
+    expect(sbplString('/private/tmp/sbx')).toBe('"/private/tmp/sbx"'); // no backslash -> unchanged
+    const p = seatbeltProfile({
+      fsScope: { rw: ['C:\\__thalos_nonexistent__\\wt'], hideRest: true },
+      network: 'none',
+    });
+    expect(p).toContain(`(subpath ${sbplString('C:\\__thalos_nonexistent__\\wt')})`); // generator uses the same encoder
+    expect(p).toContain('\\\\'); // the profile really contains a DOUBLED backslash — escaping happened
+  });
+
   it("network:'inherit' omits the network deny (network passes through)", () => {
     const p = seatbeltProfile({ fsScope: { rw: ['/tmp'], hideRest: true }, network: 'inherit' });
     expect(p).not.toContain('(deny network*)');
