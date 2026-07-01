@@ -7,7 +7,9 @@ import { defineConfig } from 'tsup';
 // CJS `require` work from the ESM bundle. Migrations (.sql) are data — copied next to the bundle
 // since tsup won't bundle them; the web SPA build is copied into dist/public when present.
 export default defineConfig({
-  entry: { index: 'src/index.ts' },
+  // Two entries: the daemon server, and the DB-LESS collab peer-agent (a separate bundle so the peer
+  // process cannot drag in better-sqlite3/Fastify — its closure is only the DB-free leaf modules).
+  entry: { index: 'src/index.ts', 'peer-agent': 'src/collab/peer-agent/index.ts' },
   format: ['esm'],
   platform: 'node',
   target: 'node22',

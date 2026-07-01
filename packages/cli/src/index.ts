@@ -1,5 +1,6 @@
 // thaloslab launcher (SPEC §13). Flags skip the menu; otherwise an interactive menu picks the
 // mode. Boots (or reuses) the daemon, reports the provider pool, and opens the browser UI.
+import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import * as p from '@clack/prompts';
 import type { ExecutionMode } from '@thaloslab/shared';
@@ -7,6 +8,7 @@ import { runMenu } from './menu';
 import { DaemonStartError, launchDaemon } from './launch';
 import { fetchProviders, formatProviders } from './detect-report';
 import { openUi } from './open-ui';
+import { resolvePeerLaunch } from './peer-locate';
 
 interface CliFlags {
   live?: boolean;
@@ -51,6 +53,27 @@ async function run(flags: CliFlags): Promise<void> {
   }
 }
 
+/** Run this machine as a collab PEER: spawn the DB-less peer-agent bundle as its own process (never
+ *  in-process — that would drag the CLI into the peer's runtime), forwarding flags; env vars
+ *  (THALOS_COLLAB_HOST/TOKEN, THALOS_PEER_ID) are inherited and resolved by the peer itself. */
+function runPeer(opts: { host?: string; token?: string; peerId?: string; cwd?: string }): void {
+  const launch = resolvePeerLaunch();
+  const forwarded: string[] = [];
+  if (opts.host) forwarded.push('--host', opts.host);
+  if (opts.token) forwarded.push('--token', opts.token);
+  if (opts.peerId) forwarded.push('--peer-id', opts.peerId);
+  if (opts.cwd) forwarded.push('--cwd', opts.cwd);
+  const child = spawn(launch.command, [...launch.args, ...forwarded], {
+    cwd: launch.cwd,
+    stdio: 'inherit',
+  });
+  child.on('exit', (code) => process.exit(code ?? 1));
+  child.on('error', (err: Error) => {
+    console.error(err.message);
+    process.exit(1);
+  });
+}
+
 const program = new Command();
 program
   .name('thaloslab')
@@ -62,6 +85,22 @@ program
   .option('--no-menu', 'skip the interactive menu')
   .option('--no-open', 'do not open the browser')
   .action((opts: CliFlags) => run(opts));
+
+program
+  .command('peer')
+  .description(
+    'run this machine as a collab peer-agent: dial a host, self-test the sandbox, serve invokes',
+  )
+  .option(
+    '--host <url>',
+    'host collab endpoint, e.g. ws://100.x.x.x:8474 (or env THALOS_COLLAB_HOST)',
+  )
+  .option('--token <token>', 'one-time join token issued by the host (or env THALOS_COLLAB_TOKEN)')
+  .option('--peer-id <id>', 'this peer’s id (or env THALOS_PEER_ID)')
+  .option('--cwd <dir>', 'scratch worktree dir for invokes (default: a temp dir)')
+  .action((opts: { host?: string; token?: string; peerId?: string; cwd?: string }) =>
+    runPeer(opts),
+  );
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));
